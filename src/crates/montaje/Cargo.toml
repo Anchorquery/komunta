@@ -1,0 +1,20 @@
+[package]
+name = "montaje"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Komunta: turns the montage engine's plan (plan.json, analisis.json, inventario.json) into an editable project."
+
+[dependencies]
+concat-project.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[[bin]]
+name = "montaje"
+path = "src/main.rs"
+
+[lints]
+workspace = true

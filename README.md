@@ -7,7 +7,17 @@ Editor de vídeo interno del equipo de comunicación de Komunikia: montaje autom
 ## Estado
 
 - **Fase 0 (esta):** fork de Concat v0.2.8 con otro nombre, icono y color de acento (azul Komunikia), carpeta de ajustes propia (`app.komunta.editor`), instaladores de Windows con identificadores propios y build en GitHub Actions.
-- **Siguientes:** pantalla «Nuevo montaje», motor de montaje portado a Rust (`crates/montaje`), agente de IA dentro del editor, subtítulos es/eu.
+- **Fase 1 (en curso):** `crates/montaje` convierte un trabajo del motor de montaje (`ia/plan.json`, `analisis.json`, `inventario.json`) en un proyecto que Komunta abre y se puede editar. La línea de tiempo da los mismos números que el motor en Python (prueba dorada con trabajos reales).
+- **Siguientes:** pantalla «Nuevo montaje» dentro de la app, el resto del motor en Rust (análisis, transcripción, plan con IA), agente de IA dentro del editor, subtítulos es/eu.
+
+### Montaje desde un trabajo del motor
+
+```sh
+cd src
+cargo run -p montaje -- <carpeta del trabajo> <carpeta del proyecto> [--formato vertical|16x9|1x1]
+```
+
+Luego, en Komunta, **Abrir proyecto** y elegir la carpeta del proyecto (o `concat.exe --project <carpeta>`). Pistas, de abajo arriba: voz, recursos, subtítulos, destellos de énfasis, música. Aún no pasa al proyecto: garabatos, subtítulos apilados, aparición palabra a palabra, cierre y destello de marca, ducking de la música.
 
 ## Descargar la build de Windows
 
@@ -50,6 +60,7 @@ El remoto `upstream` apunta a `jub0t/concat` y tiene el push desactivado.
 | Acento por defecto azul Komunikia | `ui/theme/light.slint`, `ui/theme/dark.slint` |
 | Icono | `assets/icons/`, `assets/concat-*.png` |
 | Instaladores con nombre e identificadores propios | `assets/windows/concat.iss`, `concat.wxs` |
+| Montaje: trabajo del motor → proyecto editable | `src/crates/montaje` |
 | CI solo Windows, sin disparadores automáticos en los demás workflows | `.github/workflows/` |
 
 Los modelos (Whisper, voces, recorte) se siguen descargando de las publicaciones de Concat.

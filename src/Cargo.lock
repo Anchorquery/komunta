@@ -4081,6 +4081,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "montaje"
+version = "0.2.8"
+dependencies = [
+ "concat-project",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
