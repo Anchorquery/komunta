@@ -675,7 +675,7 @@ fn get_text(url: &str) -> Result<String, String> {
         .build();
     let response = agent
         .get(url)
-        .set("User-Agent", &format!("Concat/{}", Version::current()))
+        .set("User-Agent", &format!("Komunta/{}", Version::current()))
         .set("Accept", "application/vnd.github+json")
         .call()
         .map_err(|error| match error {
@@ -850,7 +850,7 @@ mod tests {
         }
         assert_eq!(
             manifest_url("v0.2.6"),
-            "https://github.com/jub0t/Concat/releases/download/v0.2.6/manifest.json"
+            "https://github.com/Anchorquery/komunta/releases/download/v0.2.6/manifest.json"
         );
     }
 

@@ -1552,16 +1552,13 @@ global Learn {
         name: "github", glyph: Glyph.github, external: true,
         title: "GitHub", note: I18n.t("start.githubNote"),
     };
-    out property <LearnItem> chat: {
-        name: "discord", glyph: Glyph.discord, external: true,
-        title: "Discord", note: I18n.t("start.discordNote"),
-    };
     out property <LearnItem> report: {
         name: "report", glyph: Glyph.bug, external: true,
         title: I18n.t("start.reportProblem"), note: I18n.t("start.reportProblemNote"),
     };
-    out property <[LearnItem]> desk: [docs, guide, keys, code, chat, report];
-    out property <[LearnItem]> phone: [docs, guide, code, chat, report];
+    // Komunta: no Discord card - that community is Concat's, not the team's.
+    out property <[LearnItem]> desk: [docs, guide, keys, code, report];
+    out property <[LearnItem]> phone: [docs, guide, code, report];
 }
 
 // The learn cards as a grid of rows, for the wide page under the projects

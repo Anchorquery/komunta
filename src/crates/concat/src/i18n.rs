@@ -48,8 +48,12 @@ pub struct Language {
     pub name: String,
 }
 
-/// The code the interface starts in, and the language of the keys.
+/// The language of the keys, and what every language falls back to.
 pub const ENGLISH: &str = "en";
+
+/// Komunta: the language the interface starts in until Settings picks
+/// another. The team works in Spanish; Basque has no translation yet.
+pub const DEFAULT: &str = "es";
 
 /// The locales the app ships, as `(code, file)`. `en.json` is the
 /// inventory - every key, with its English - which is what a translator

@@ -44,6 +44,9 @@ El remoto `upstream` apunta a `jub0t/concat` y tiene el push desactivado.
 | Nombre en ventana, textos (25 idiomas), carpeta de proyectos por defecto | `src/crates/concat/ui/app.slint`, `locales/*.json`, `panes/start.rs`, `platform.rs` |
 | Carpeta de ajustes y modelos: `app.komunta.editor` | `src/crates/concat-host/src/dirs.rs` |
 | Actualizaciones y enlaces apuntan a este repo | `concat-host/src/updates.rs`, `panes/start.rs` |
+| Castellano por defecto (hasta que se elija otro idioma en Ajustes) | `src/crates/concat/src/i18n.rs` (`DEFAULT`), `studio.rs`, `panes/settings.rs` |
+| Inicio sin tarjeta de Discord; «Informar de un problema» abre una incidencia aquí; «Novedades» lleva a este README. La documentación sigue siendo la guía de Concat (es el mismo editor) | `ui/start.slint`, `panes/start.rs` |
+| «Komunta» en el diálogo de error al arrancar, la información del sistema, el User-Agent y las instrucciones del servidor MCP | `platform.rs`, `sysinfo.rs`, `concat-host/src/machine.rs`, `concat-mcp/src/` |
 | Acento por defecto azul Komunikia | `ui/theme/light.slint`, `ui/theme/dark.slint` |
 | Icono | `assets/icons/`, `assets/concat-*.png` |
 | Instaladores con nombre e identificadores propios | `assets/windows/concat.iss`, `concat.wxs` |
