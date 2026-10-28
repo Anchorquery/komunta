@@ -52,18 +52,19 @@ pub struct Language {
 pub const ENGLISH: &str = "en";
 
 /// Komunta: the language the interface starts in until Settings picks
-/// another. The team works in Spanish; Basque has no translation yet.
+/// another. The team works in Spanish and Basque.
 pub const DEFAULT: &str = "es";
 
 /// The locales the app ships, as `(code, file)`. `en.json` is the
 /// inventory - every key, with its English - which is what a translator
 /// starts a new file from, and what every language falls back to.
-pub(crate) const BUILT_IN: [(&str, &str); 25] = [
+pub(crate) const BUILT_IN: [(&str, &str); 26] = [
     ("en", include_str!("../locales/en.json")),
     ("ar", include_str!("../locales/ar.json")),
     ("bn", include_str!("../locales/bn.json")),
     ("de", include_str!("../locales/de.json")),
     ("es", include_str!("../locales/es.json")),
+    ("eu", include_str!("../locales/eu.json")),
     ("fa", include_str!("../locales/fa.json")),
     ("fr", include_str!("../locales/fr.json")),
     ("he", include_str!("../locales/he.json")),
