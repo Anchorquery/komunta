@@ -59,6 +59,24 @@ export struct ShortcutData {
     custom: bool,
 }
 
+/// Komunta's Settings › Montaje e IA: where the montage engine is, the
+/// Python it runs on, and the AI that plans. Its own struct, published by
+/// `panes::montaje`, so the sheet's own data stays Concat's.
+export struct MontajeSettingsData {
+    /// The engine's folder, as Settings has it or where it usually is.
+    engine: string,
+    /// The folder holds the engine.
+    engine-ok: bool,
+    /// The Python set by hand; empty is the engine's own.
+    python: string,
+    /// "Se usa: C:\...\python.exe".
+    python-note: string,
+    brain: int,
+    brains: [string],
+    /// Where the team's own recipes live.
+    recipes: string,
+}
+
 export struct SettingsData {
     open: bool,
     /// 0 General, 1 Appearance, 2 Transcriber, 3 Speech, 4 Remote, 5 About,
@@ -580,6 +598,12 @@ component ShortcutRow inherits Rectangle {
 
 export component SettingsDialog inherits Modal {
     in property <SettingsData> data;
+    in property <MontajeSettingsData> montaje;
+    /// The Montaje e IA page: a field, by name, and what it holds now; a
+    /// choice by name and index; a button by name.
+    callback montaje-edited(field: string, text: string);
+    callback montaje-choice(field: string, index: int);
+    callback montaje-action(name: string);
     in property <[ModelData]> transcribers;
     in property <[ModelData]> voices;
     /// the releases a person can switch to, newest first, and beside each
@@ -680,6 +704,7 @@ export component SettingsDialog inherits Modal {
         {label: I18n.t("common.speech"), glyph: Glyph.music, page: 3, desk: false},
         {label: I18n.t("settings.automation"), glyph: Glyph.lock, page: 4, desk: true},
         {label: I18n.t("settings.version"), glyph: Glyph.tag, page: 6, desk: true},
+        {label: I18n.t("montaje.settingsPage"), glyph: Glyph.film, page: 8, desk: true},
         {label: I18n.t("settings.about"), glyph: Glyph.sparkle, page: 5, desk: false},
     ];
 
@@ -1627,6 +1652,118 @@ export component SettingsDialog inherits Modal {
                     for fact in root.system-facts: FactRow {
                         label: fact.label;
                         value: fact.value;
+                    }
+                }
+            }
+
+            // Komunta's montage engine: where it is, what it runs on, and
+            // which AI plans. A desk's affair: the engine is a folder of
+            // Python on this computer.
+            if root.data.tab == 8 && !root.phone: VerticalLayout {
+                DialogSection {
+                    ruled: false;
+                    first: true;
+                    title: I18n.t("montaje.engine");
+                    hint: I18n.t("montaje.engineHint");
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Field {
+                            value: root.montaje.engine;
+                            technical: true;
+                            edited(text) => { root.montaje-edited("engine", text); }
+                        }
+
+                        Button {
+                            horizontal-stretch: 0;
+                            label: I18n.t("start.choose");
+                            glyph: Glyph.folder;
+                            clicked => { root.montaje-action("browse-engine"); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 8px;
+                                height: 8px;
+                                border-radius: self.width / 2;
+                                background: root.montaje.engine-ok ? Theme.green : Theme.danger;
+                            }
+                        }
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.montaje.engine-ok ? I18n.t("montaje.engineReady") : I18n.t("montaje.engineAbsent");
+                            color: root.montaje.engine-ok ? Theme.fg-muted : Theme.danger;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("montaje.brain");
+                    hint: I18n.t("montaje.brainHint");
+
+                    Select {
+                        options: root.montaje.brains;
+                        current: root.montaje.brain;
+                        changed(index) => { root.montaje-choice("brain", index); }
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: "Python";
+                    hint: I18n.t("montaje.pythonHint");
+
+                    Field {
+                        value: root.montaje.python;
+                        placeholder: I18n.t("montaje.pythonPlaceholder");
+                        technical: true;
+                        edited(text) => { root.montaje-edited("python", text); }
+                    }
+
+                    Text {
+                        text: root.montaje.python-note;
+                        color: Theme.fg-dim;
+                        font-family: Theme.font-technical;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("montaje.recipes");
+                    hint: I18n.t("montaje.recipesHint");
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.montaje.recipes;
+                            color: Theme.fg-muted;
+                            font-family: Theme.font-technical;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+
+                        Button {
+                            horizontal-stretch: 0;
+                            label: I18n.t("montaje.openFolder");
+                            glyph: Glyph.folder;
+                            clicked => { root.montaje-action("recipes"); }
+                        }
                     }
                 }
             }

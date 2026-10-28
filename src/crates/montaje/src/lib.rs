@@ -8,10 +8,13 @@
 //! an ordinary project folder the editor opens, where every cut, caption
 //! and piece of B-roll can still be changed.
 
+pub mod encargo;
 pub mod entrada;
 pub mod garabatos;
+pub mod guion;
 pub mod kit;
 pub mod linea;
+pub mod motor;
 pub mod proyecto;
 pub mod receta;
 pub mod sondeo;
@@ -20,9 +23,12 @@ use std::path::{Path, PathBuf};
 
 use concat_project::{DocumentSettings, Editor, Project, to_document};
 
+pub use encargo::Encargo;
 pub use entrada::Trabajo;
+pub use guion::{Guion, PlanCrudo};
 pub use kit::Kit;
 pub use linea::{Linea, construir_linea};
+pub use motor::{Motor, Pedido};
 pub use proyecto::{Formato, Opciones, construir_proyecto};
 pub use receta::Receta;
 

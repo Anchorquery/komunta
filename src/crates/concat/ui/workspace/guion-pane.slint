@@ -1,0 +1,420 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Komunikia
+
+// Komunta's "Guion de montaje": the plan of a montage project, read as a
+// script rather than as JSON. One card per take, in order: what is said,
+// word by word - a word clicked is cut, struck through, and clicked again
+// comes back - then the captions that go over it, editable in place, and
+// the B-roll laid on it. Takes move up and down and go. Nothing touches the
+// timelines until "Aplicar al vídeo", which lays the edited plan out again
+// as new timelines beside the old ones.
+//
+// The state is all Rust's (`panes::guion`), in the `GuionPanel` global, so
+// two seats showing the script are one script.
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { IconButton } from "../primitives/panel.slint";
+import { Button, Field } from "../primitives/modal.slint";
+import { Pane, PaneHeader, PaneScroll } from "pane.slint";
+import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
+
+/// One word of a take.
+export struct GuionWordData {
+    take: int,
+    /// Its index in the clip's transcript.
+    i: int,
+    text: string,
+    /// Cut from the video.
+    cut: bool,
+    /// A filler the AI would cut ("eh", "o sea"...).
+    filler: bool,
+}
+
+/// A line of words, as wide as the pane: Slint has no flowing layout, so
+/// Rust breaks the take into lines by the width the pane reports.
+export struct GuionRowData {
+    words: [GuionWordData],
+}
+
+/// A caption or a piece of B-roll, by its index in the plan.
+export struct GuionChipData {
+    index: int,
+    text: string,
+    /// Its style or its effect, dim beside it.
+    note: string,
+}
+
+/// One take.
+export struct GuionBlockData {
+    take: int,
+    /// The clip's name in the material.
+    clip: string,
+    /// 0 spoken, 1 sound only, 2 a shot without words.
+    kind: int,
+    /// "0:12".
+    duration: string,
+    rows: [GuionRowData],
+    captions: [GuionChipData],
+    resources: [GuionChipData],
+    first: bool,
+    last: bool,
+}
+
+export global GuionPanel {
+    /// The open project was made by a montage, and its plan was found.
+    in property <bool> linked;
+    in property <[GuionBlockData]> blocks;
+    /// "4 tomas · 0:42 · versión 2".
+    in property <string> summary;
+    /// There are edits not yet applied.
+    in property <bool> dirty;
+    /// "Aplicar al vídeo" is working.
+    in property <bool> busy;
+    /// What happened last, or why not.
+    in property <string> status;
+
+    /// The pane is this many characters wide, near enough.
+    callback resized(columns: int);
+    callback word-toggled(take: int, i: int);
+    callback take-removed(take: int);
+    callback take-moved(take: int, by: int);
+    callback caption-edited(index: int, text: string);
+    callback caption-removed(index: int);
+    callback resource-removed(index: int);
+    /// Back to the plan as it was last applied.
+    callback revert();
+    callback apply();
+}
+
+/// A word: clicked, it is cut or comes back.
+component Word inherits Rectangle {
+    in property <GuionWordData> word;
+
+    width: label.preferred-width + 6px;
+    height: 22px;
+    border-radius: Theme.r-xs;
+    background: touch.has-hover ? Theme.field-hover : Colors.transparent;
+
+    label := Text {
+        x: 3px;
+        text: root.word.text;
+        color: root.word.cut ? Theme.fg-dim
+            : root.word.filler ? Theme.fg-muted
+            : Theme.fg;
+        font-size: Theme.fs;
+        font-italic: root.word.filler;
+        vertical-alignment: center;
+    }
+
+    // Slint has no strike-through: a rule across the word does it.
+    if root.word.cut: Rectangle {
+        x: 2px;
+        y: parent.height / 2;
+        width: parent.width - 4px;
+        height: 1.5px;
+        background: Theme.danger;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { GuionPanel.word-toggled(root.word.take, root.word.i); }
+    }
+}
+
+/// The small title over a list in a card.
+component Label inherits Text {
+    color: Theme.fg-dim;
+    font-size: Theme.fs-xs;
+    font-weight: Theme.weight-title;
+}
+
+component Block inherits Rectangle {
+    in property <GuionBlockData> block;
+    in property <bool> busy;
+
+    border-radius: Theme.r;
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.line;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        // Which take, from which clip, how long, and the three moves.
+        HorizontalLayout {
+            spacing: 8px;
+
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: self.height / 2;
+                background: Theme.accent-soft;
+                Text {
+                    text: root.block.take + 1;
+                    color: Theme.accent;
+                    font-size: Theme.fs-sm;
+                    font-weight: Theme.weight-title;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                text: root.block.clip;
+                color: Theme.fg-muted;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.block.kind == 1 ? I18n.t("guion.soundOnly")
+                    : root.block.kind == 2 ? I18n.t("guion.shot")
+                    : I18n.t("guion.spoken");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: root.block.duration;
+                color: Theme.fg-muted;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+            }
+
+            IconButton {
+                glyph: Glyph.chevron-up;
+                enabled: !root.block.first && !root.busy;
+                text: I18n.t("guion.moveUp");
+                clicked => { GuionPanel.take-moved(root.block.take, -1); }
+            }
+
+            IconButton {
+                glyph: Glyph.chevron-down;
+                enabled: !root.block.last && !root.busy;
+                text: I18n.t("guion.moveDown");
+                clicked => { GuionPanel.take-moved(root.block.take, 1); }
+            }
+
+            IconButton {
+                glyph: Glyph.trash;
+                danger: true;
+                enabled: !root.busy;
+                text: I18n.t("guion.removeTake");
+                clicked => { GuionPanel.take-removed(root.block.take); }
+            }
+        }
+
+        // What is said, a line at a time.
+        if root.block.rows.length > 0: VerticalLayout {
+            spacing: 0px;
+            for row in root.block.rows: HorizontalLayout {
+                alignment: start;
+                spacing: 0px;
+                for word in row.words: Word {
+                    word: word;
+                }
+            }
+        }
+
+        if root.block.rows.length == 0: Text {
+            text: I18n.t("guion.noWords");
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            font-italic: true;
+        }
+
+        if root.block.captions.length > 0: VerticalLayout {
+            spacing: 4px;
+
+            Label { text: I18n.upper("guion.captions"); }
+
+            for caption in root.block.captions: HorizontalLayout {
+                spacing: 6px;
+
+                Field {
+                    value: caption.text;
+                    edited(text) => { GuionPanel.caption-edited(caption.index, text); }
+                }
+
+                Text {
+                    text: caption.note;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+
+                IconButton {
+                    glyph: Glyph.close;
+                    enabled: !root.busy;
+                    text: I18n.t("guion.removeCaption");
+                    clicked => { GuionPanel.caption-removed(caption.index); }
+                }
+            }
+        }
+
+        if root.block.resources.length > 0: VerticalLayout {
+            spacing: 4px;
+
+            Label { text: I18n.upper("guion.resources"); }
+
+            for resource in root.block.resources: HorizontalLayout {
+                spacing: 6px;
+
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: Glyph.film;
+                        size: 12px;
+                        tint: Theme.fg-muted;
+                    }
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: resource.text;
+                    color: Theme.fg;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: resource.note;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                }
+
+                IconButton {
+                    glyph: Glyph.close;
+                    enabled: !root.busy;
+                    text: I18n.t("guion.removeResource");
+                    clicked => { GuionPanel.resource-removed(resource.index); }
+                }
+            }
+        }
+    }
+}
+
+export component GuionPane inherits Pane {
+    in property <int> pane-seat;
+    in property <bool> pane-removable;
+    callback pane-picked(kind: PaneKind);
+    callback pane-removed();
+
+    // About how many characters fit across, at the body's size, for Rust
+    // to break the takes into lines by.
+    changed width => {
+        GuionPanel.resized(Math.max(16, Math.floor((self.width - 44px) / 7.2px)));
+    }
+    init => {
+        GuionPanel.resized(Math.max(16, Math.floor((self.width - 44px) / 7.2px)));
+    }
+
+    PaneHeader {
+        title: I18n.t("guion.title");
+
+        VerticalLayout {
+            alignment: center;
+            PaneSwitcher {
+                kind: PaneKind.guion;
+                seat: root.pane-seat;
+                removable: root.pane-removable;
+                picked(kind) => { root.pane-picked(kind); }
+                removed => { root.pane-removed(); }
+            }
+        }
+    }
+
+    if !GuionPanel.linked: VerticalLayout {
+        vertical-stretch: 1;
+        padding: 24px;
+        alignment: center;
+        spacing: 8px;
+
+        Icon {
+            glyph: Glyph.sparkle;
+            size: 20px;
+            tint: Theme.fg-dim;
+        }
+
+        Text {
+            text: I18n.t("guion.notMontage");
+            color: Theme.fg-muted;
+            font-size: Theme.fs;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+
+    if GuionPanel.linked: Rectangle {
+        height: 40px;
+        Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 8px;
+            spacing: 8px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: GuionPanel.status != "" ? GuionPanel.status : GuionPanel.summary;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    label: I18n.t("guion.revert");
+                    ghost: true;
+                    enabled: GuionPanel.dirty && !GuionPanel.busy;
+                    clicked => { GuionPanel.revert(); }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    label: GuionPanel.busy ? I18n.t("guion.applying") : I18n.t("guion.apply");
+                    glyph: Glyph.sparkle;
+                    primary: true;
+                    enabled: !GuionPanel.busy;
+                    clicked => { GuionPanel.apply(); }
+                }
+            }
+        }
+    }
+
+    if GuionPanel.linked: PaneScroll {
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
+
+            for block in GuionPanel.blocks: Block {
+                block: block;
+                busy: GuionPanel.busy;
+            }
+
+            Text {
+                text: I18n.t("guion.hint");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

@@ -139,6 +139,8 @@ pollster.workspace = true
 concat-core.workspace = true
 concat-media.workspace = true
 concat-project.workspace = true
+# Komunta's automatic montage: the engine, the plan and its layout.
+montaje = { path = "../montaje" }
 concat-export.workspace = true
 concat-host = { workspace = true, features = ["gpu"] }
 concat-speech = { workspace = true, features = ["chatterbox"] }

@@ -887,6 +887,10 @@ pub struct Studio {
     // ── the launch screen ──
     pub on_start: bool,
     pub start: crate::panes::start::StartPane,
+    /// Komunta's "Nuevo montaje" sheet.
+    pub montaje: crate::panes::montaje::MontajePane,
+    /// Komunta's "Guion de montaje" pane.
+    pub guion: crate::panes::guion::GuionPane,
     pub recents: Vec<projects::Recent>,
     pub posters: HashMap<String, slint::Image>,
     posters_pending: HashSet<String>,
@@ -2293,6 +2297,8 @@ impl Studio {
             toast: ToastState::default(),
             on_start: true,
             start,
+            montaje: Default::default(),
+            guion: Default::default(),
             recents,
             posters: HashMap::new(),
             posters_pending: HashSet::new(),
@@ -8171,6 +8177,12 @@ impl Studio {
                 self.handle(crate::panes::Msg::Monitor(
                     crate::panes::monitor::MonitorMsg::Opened,
                 ));
+                // Komunta: a montage opens with its script where the
+                // library was, unless the script is already up.
+                self.guion.load(std::path::Path::new(&info.path));
+                if self.guion.linked() && !self.dock.contains(PaneKind::Guion) {
+                    self.dock.replace(PaneKind::Media, PaneKind::Guion);
+                }
                 self.recents = projects::recents(&self.host.dirs.config);
                 self.host.monitor.clear();
                 self.audition = None;
@@ -8312,7 +8324,8 @@ impl Studio {
 
     /// Lets the open project go, unsaved: what `close_project` does once
     /// the save has landed, and what quitting without saving does instead.
-    fn release_project(&mut self) {
+    pub(crate) fn release_project(&mut self) {
+        self.guion = Default::default();
         self.host.cutouts.cancel();
         self.host.stabilizers.cancel();
         self.host.enhancers.cancel();
@@ -8460,6 +8473,16 @@ impl Studio {
                 let mut pane = std::mem::take(&mut self.start);
                 pane.update(msg, self);
                 self.start = pane;
+            }
+            crate::panes::Msg::Montaje(msg) => {
+                let mut pane = std::mem::take(&mut self.montaje);
+                pane.update(msg, self);
+                self.montaje = pane;
+            }
+            crate::panes::Msg::Guion(msg) => {
+                let mut pane = std::mem::take(&mut self.guion);
+                pane.update(msg, self);
+                self.guion = pane;
             }
             crate::panes::Msg::Media(msg) => {
                 let mut pane = std::mem::take(&mut self.media);
@@ -10703,6 +10726,9 @@ impl Studio {
             failed: self.toast.failed,
         });
         app.set_start(self.start.data());
+        app.set_montaje(self.montaje.data(self));
+        app.set_montaje_settings(self.montaje.settings_data(self));
+        self.guion.publish(app);
         app.set_recents_total(self.recents.len() as i32);
         sync(
             &models.recents,

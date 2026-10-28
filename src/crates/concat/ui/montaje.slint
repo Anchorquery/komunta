@@ -1,0 +1,639 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Komunikia
+
+// Komunta's "Nuevo montaje": the material, what the video is for, and the
+// captions, in three steps; then the engine's progress until the project
+// opens. It wears the launch screen's clothes - the plain fields, the chip
+// rows, the ink pill - because it is the launch screen's other form.
+//
+// The state is all Rust's (`panes::montaje`), published whole as
+// `MontajeData`. The sheet reports back through three callbacks: a text
+// field changed, a choice changed, or an action was pressed, each by name,
+// so the window does not grow a callback per field.
+
+import { I18n } from "i18n.slint";
+import { Theme } from "theme/theme.slint";
+import { CopyChip, Modal, Progress } from "primitives/modal.slint";
+import { Glyph, Icon } from "icons.slint";
+import { Select } from "primitives/select.slint";
+import { Focus } from "util.slint";
+import { Chip, ChipOption, ChipRow, FormRow, LinkButton, PillButton, PlainInput } from "start.slint";
+
+export struct MontajeData {
+    /// The sheet is up.
+    open: bool,
+    /// 0 material, 1 what it is for, 2 captions and script, 3 working.
+    step: int,
+    name: string,
+    /// The material folder.
+    material: string,
+    /// "12 vídeos, 4 fotos, 1 documento", or why the folder will not do.
+    material-note: string,
+    /// Where the project folder goes.
+    location: string,
+    recipe: int,
+    recipes: [string],
+    /// What the chosen recipe makes.
+    recipe-note: string,
+    /// "¿Qué quieres?", as typed.
+    request: string,
+    vertical: bool,
+    wide: bool,
+    square: bool,
+    brand: int,
+    /// "Sin marca" first, then the engine's kits.
+    brands: [string],
+    /// 0 detect, 1 Spanish, 2 Basque.
+    language: int,
+    /// 0 from the script, 1 from the voice, 2 key phrases, 3 none.
+    captions: int,
+    /// A script file outside the material; empty for none.
+    script: string,
+    /// The engine is where Settings says.
+    engine-ok: bool,
+    /// What is wrong with it when it is not, or which AI will plan.
+    engine-note: string,
+    busy: bool,
+    /// The phase under way: 0 reading, 1 analysing, 2 describing, 3 plan,
+    /// 4 laying out.
+    phase: int,
+    progress: float,
+    message: string,
+    error: string,
+}
+
+// One phase of the run: a tick once done, a dot while under way, a ring
+// before.
+component PhaseRow inherits HorizontalLayout {
+    in property <string> label;
+    /// -1 to come, 0 under way, 1 done.
+    in property <int> state;
+
+    spacing: 10px;
+    height: 26px;
+
+    Rectangle {
+        width: 18px;
+        height: 18px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 9px;
+        background: root.state == 1 ? Theme.accent : transparent;
+        border-width: root.state == 1 ? 0px : 1.5px;
+        border-color: root.state == 0 ? Theme.accent : Theme.line-strong;
+
+        if root.state == 1: Icon {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            glyph: Glyph.check;
+            size: 11px;
+            tint: Theme.on-accent;
+        }
+
+        if root.state == 0: Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: Theme.accent;
+        }
+    }
+
+    Text {
+        vertical-alignment: center;
+        text: root.label;
+        color: root.state < 0 ? Theme.fg-dim : Theme.fg;
+        font-size: Theme.fs-lg;
+        font-weight: root.state == 0 ? Theme.weight-title : Theme.weight-body;
+    }
+}
+
+// The three steps' names across the top, the current one in ink.
+component Steps inherits HorizontalLayout {
+    in property <int> current;
+
+    spacing: 6px;
+    alignment: start;
+
+    for label[index] in [
+        I18n.t("montaje.stepMaterial"),
+        I18n.t("montaje.stepWhat"),
+        I18n.t("montaje.stepCaptions"),
+    ]: HorizontalLayout {
+        spacing: 6px;
+
+        Rectangle {
+            width: 20px;
+            height: 20px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 10px;
+            background: index <= root.current ? Theme.accent : Theme.launch-raised;
+
+            Text {
+                text: "\{index + 1}";
+                color: index <= root.current ? Theme.on-accent : Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                font-weight: Theme.weight-title;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            vertical-alignment: center;
+            text: label;
+            color: index == root.current ? Theme.fg : Theme.fg-dim;
+            font-size: Theme.fs;
+            font-weight: index == root.current ? Theme.weight-title : Theme.weight-body;
+        }
+
+        if index < 2: Text {
+            vertical-alignment: center;
+            text: "  ·  ";
+            color: Theme.fg-dim;
+        }
+    }
+}
+
+// A notice in the danger tone, wrapping to the whole error.
+component Notice inherits Rectangle {
+    in property <string> text;
+
+    height: row.preferred-height;
+    border-radius: Theme.r;
+    background: Theme.danger-soft;
+
+    row := HorizontalLayout {
+        padding: 8px;
+        padding-left: 10px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: start;
+            padding-top: 2px;
+            Icon {
+                glyph: Glyph.info;
+                size: 13px;
+                tint: Theme.danger;
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            color: Theme.danger;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        VerticalLayout {
+            alignment: start;
+            CopyChip {
+                text: root.text;
+            }
+        }
+    }
+}
+
+export component MontajeDialog inherits Modal {
+    in property <MontajeData> data;
+
+    /// A text field changed: "name", "material", "location", "request".
+    callback text-edited(field: string, value: string);
+    /// A choice changed: "recipe", "brand", "language", "captions", and
+    /// "vertical", "wide", "square" as 0 or 1.
+    callback choice-changed(field: string, value: int);
+    /// "browse-material", "browse-location", "browse-script",
+    /// "clear-script", "next", "back", "create", "cancel", "settings".
+    callback action(name: string);
+
+    property <bool> narrow: root.width < 680px;
+    property <bool> can-next: !root.data.busy && root.data.name != ""
+        && root.data.material != "" && root.data.location != "";
+    property <bool> can-create: root.can-next && root.data.engine-ok
+        && (root.data.vertical || root.data.wide || root.data.square);
+
+    open: root.data.open;
+    title: I18n.t("montaje.newMontage");
+    glyph: Glyph.sparkle;
+    dismissable: !root.data.busy;
+    surface-width: Math.min(660px, root.width - 32px);
+
+    // The request box keeps its own copy while it has the caret, as the
+    // plain fields do: a republish mid-word must not move it.
+    property <string> request-draft;
+    changed open => {
+        if (root.open) {
+            root.request-draft = root.data.request;
+        }
+    }
+
+    VerticalLayout {
+        padding-left: root.narrow ? 18px : 26px;
+        padding-right: root.narrow ? 18px : 26px;
+        padding-top: 16px;
+        padding-bottom: 22px;
+
+        if root.data.step < 3: Steps {
+            current: root.data.step;
+        }
+
+        // ── 1. the material ──────────────────────────────────────────
+        if root.data.step == 0: VerticalLayout {
+            FormRow {
+                label: I18n.upper("common.name");
+                stacked: root.narrow;
+
+                PlainInput {
+                    text: root.data.name;
+                    placeholder: I18n.t("montaje.namePlaceholder");
+                    edited(text) => { root.text-edited("name", text); }
+                    accepted => { root.action("next"); }
+                }
+            }
+
+            FormRow {
+                label: I18n.upper("montaje.material");
+                stacked: root.narrow;
+
+                VerticalLayout {
+                    spacing: 6px;
+
+                    HorizontalLayout {
+                        spacing: 12px;
+
+                        PlainInput {
+                            horizontal-stretch: 1;
+                            text: root.data.material;
+                            placeholder: I18n.t("montaje.materialPlaceholder");
+                            size: Theme.fs;
+                            face: Theme.font-technical;
+                            edited(text) => { root.text-edited("material", text); }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 0;
+                            LinkButton {
+                                label: I18n.t("start.choose");
+                                clicked => {
+                                    Focus.release();
+                                    root.action("browse-material");
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.data.material-note;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            FormRow {
+                label: I18n.upper("start.location");
+                stacked: root.narrow;
+                last: true;
+
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    PlainInput {
+                        horizontal-stretch: 1;
+                        text: root.data.location;
+                        placeholder: I18n.t("start.chooseAFolder");
+                        size: Theme.fs;
+                        face: Theme.font-technical;
+                        edited(text) => { root.text-edited("location", text); }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        LinkButton {
+                            label: I18n.t("start.choose");
+                            clicked => {
+                                Focus.release();
+                                root.action("browse-location");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 2. what it is for ────────────────────────────────────────
+        if root.data.step == 1: VerticalLayout {
+            FormRow {
+                label: I18n.upper("montaje.kind");
+                stacked: root.narrow;
+
+                VerticalLayout {
+                    spacing: 6px;
+
+                    Select {
+                        options: root.data.recipes;
+                        current: root.data.recipe;
+                        changed(index) => { root.choice-changed("recipe", index); }
+                    }
+
+                    Text {
+                        text: root.data.recipe-note;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            FormRow {
+                label: I18n.upper("montaje.request");
+                stacked: root.narrow;
+
+                Rectangle {
+                    height: 96px;
+                    border-radius: Theme.r;
+                    background: Theme.launch-well;
+                    border-width: 1px;
+                    border-color: request.has-focus ? Theme.accent : Theme.line;
+                    clip: true;
+
+                    request := TextInput {
+                        x: 10px;
+                        y: 8px;
+                        width: parent.width - 20px;
+                        height: parent.height - 16px;
+                        text <=> root.request-draft;
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        single-line: false;
+                        wrap: word-wrap;
+                        selection-background-color: Theme.accent;
+                        selection-foreground-color: Theme.on-accent;
+                        edited => { root.text-edited("request", self.text); }
+                    }
+
+                    if root.request-draft == "" && !request.has-focus: Text {
+                        x: 10px;
+                        y: 8px;
+                        width: parent.width - 20px;
+                        text: I18n.t("montaje.requestPlaceholder");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            FormRow {
+                label: I18n.upper("montaje.formats");
+                stacked: root.narrow;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    Chip {
+                        label: I18n.t("montaje.vertical");
+                        ratio: 9 / 16;
+                        selected: root.data.vertical;
+                        clicked => { root.choice-changed("vertical", root.data.vertical ? 0 : 1); }
+                    }
+
+                    Chip {
+                        label: I18n.t("montaje.wide");
+                        ratio: 16 / 9;
+                        selected: root.data.wide;
+                        clicked => { root.choice-changed("wide", root.data.wide ? 0 : 1); }
+                    }
+
+                    Chip {
+                        label: I18n.t("montaje.square");
+                        ratio: 1;
+                        selected: root.data.square;
+                        clicked => { root.choice-changed("square", root.data.square ? 0 : 1); }
+                    }
+                }
+            }
+
+            FormRow {
+                label: I18n.upper("montaje.brand");
+                stacked: root.narrow;
+                last: true;
+
+                HorizontalLayout {
+                    alignment: start;
+                    Select {
+                        width: 240px;
+                        options: root.data.brands;
+                        current: root.data.brand;
+                        changed(index) => { root.choice-changed("brand", index); }
+                    }
+                }
+            }
+        }
+
+        // ── 3. captions and script ───────────────────────────────────
+        if root.data.step == 2: VerticalLayout {
+            FormRow {
+                label: I18n.upper("montaje.captions");
+                stacked: root.narrow;
+
+                VerticalLayout {
+                    spacing: 6px;
+
+                    ChipRow {
+                        options: [
+                            { label: I18n.t("montaje.captionsScript"), ratio: 0 },
+                            { label: I18n.t("montaje.captionsVoice"), ratio: 0 },
+                            { label: I18n.t("montaje.captionsKeys"), ratio: 0 },
+                            { label: I18n.t("montaje.captionsNone"), ratio: 0 },
+                        ];
+                        current: root.data.captions;
+                        per-row: root.narrow ? 2 : 0;
+                        block: root.narrow;
+                        changed(index) => { root.choice-changed("captions", index); }
+                    }
+
+                    Text {
+                        text: root.data.captions == 0 ? I18n.t("montaje.captionsScriptNote")
+                            : root.data.captions == 1 ? I18n.t("montaje.captionsVoiceNote")
+                            : root.data.captions == 2 ? I18n.t("montaje.captionsKeysNote")
+                            : I18n.t("montaje.captionsNoneNote");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            FormRow {
+                label: I18n.upper("montaje.script");
+                stacked: root.narrow;
+
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    Text {
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        text: root.data.script == "" ? I18n.t("montaje.scriptNone") : root.data.script;
+                        color: root.data.script == "" ? Theme.fg-dim : Theme.fg;
+                        font-size: Theme.fs;
+                        font-family: root.data.script == "" ? Theme.font : Theme.font-technical;
+                        wrap: word-wrap;
+                    }
+
+                    if root.data.script != "": VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        LinkButton {
+                            label: I18n.t("montaje.remove");
+                            clicked => { root.action("clear-script"); }
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 0;
+                        LinkButton {
+                            label: I18n.t("start.choose");
+                            clicked => { root.action("browse-script"); }
+                        }
+                    }
+                }
+            }
+
+            FormRow {
+                label: I18n.upper("montaje.language");
+                stacked: root.narrow;
+                last: true;
+
+                ChipRow {
+                    options: [
+                        { label: I18n.t("montaje.languageDetect"), ratio: 0 },
+                        { label: I18n.t("montaje.languageEs"), ratio: 0 },
+                        { label: I18n.t("montaje.languageEu"), ratio: 0 },
+                    ];
+                    current: root.data.language;
+                    changed(index) => { root.choice-changed("language", index); }
+                }
+            }
+        }
+
+        // ── working ──────────────────────────────────────────────────
+        if root.data.step == 3: VerticalLayout {
+            spacing: 4px;
+            padding-top: 4px;
+
+            for label[index] in [
+                I18n.t("montaje.phaseRead"),
+                I18n.t("montaje.phaseAnalyse"),
+                I18n.t("montaje.phaseDescribe"),
+                I18n.t("montaje.phasePlan"),
+                I18n.t("montaje.phaseLayout"),
+            ]: PhaseRow {
+                label: label;
+                state: index < root.data.phase ? 1 : (index == root.data.phase && root.data.error == "") ? 0 : -1;
+            }
+
+            Rectangle { height: 12px; }
+
+            Progress {
+                value: (root.data.phase + root.data.progress) / 5;
+                live: root.data.busy;
+            }
+
+            Rectangle { height: 6px; }
+
+            Text {
+                text: root.data.message;
+                color: Theme.fg-muted;
+                font-size: Theme.fs-sm;
+                font-family: Theme.font-technical;
+                overflow: elide;
+            }
+        }
+
+        // The engine is not set up: say so where the button would be
+        // pressed, with the way to Settings beside it.
+        if !root.data.engine-ok && root.data.step < 3: VerticalLayout {
+            padding-top: 12px;
+
+            HorizontalLayout {
+                spacing: 12px;
+
+                Notice {
+                    horizontal-stretch: 1;
+                    text: root.data.engine-note;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    LinkButton {
+                        label: I18n.t("common.settings");
+                        clicked => { root.action("settings"); }
+                    }
+                }
+            }
+        }
+
+        if root.data.error != "": VerticalLayout {
+            padding-top: 12px;
+            Notice {
+                text: root.data.error;
+            }
+        }
+
+        Rectangle { height: 22px; }
+
+        // ── the buttons ──────────────────────────────────────────────
+        HorizontalLayout {
+            spacing: 18px;
+
+            if (root.data.step > 0 && root.data.step < 3) || (root.data.step == 3 && !root.data.busy): VerticalLayout {
+                alignment: center;
+                LinkButton {
+                    label: I18n.t("montaje.back");
+                    clicked => { root.action("back"); }
+                }
+            }
+
+            if root.data.step == 3 && root.data.busy: VerticalLayout {
+                alignment: center;
+                LinkButton {
+                    label: I18n.t("common.cancel");
+                    clicked => { root.action("cancel"); }
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            if root.data.step == 3 && root.data.busy: VerticalLayout {
+                alignment: center;
+                Text {
+                    text: I18n.t("montaje.takesMinutes");
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                }
+            }
+
+            if root.data.step < 2: PillButton {
+                primary: true;
+                label: I18n.t("montaje.next");
+                enabled: root.can-next;
+                clicked => { root.action("next"); }
+            }
+
+            if root.data.step == 2: PillButton {
+                primary: true;
+                label: I18n.t("montaje.create");
+                enabled: root.can-create;
+                clicked => { root.action("create"); }
+            }
+        }
+    }
+}

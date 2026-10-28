@@ -95,8 +95,10 @@ use host::{Host, Shell};
 use panes::Msg;
 use panes::captions::CaptionsMsg;
 use panes::export::ExportMsg;
+use panes::guion::GuionMsg;
 use panes::media_bin::MediaMsg;
 use panes::monitor::MonitorMsg;
+use panes::montaje::MontajeMsg;
 use panes::project::ProjectMsg;
 use panes::relink::RelinkMsg;
 use panes::settings::SettingsMsg;
@@ -621,6 +623,75 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }
 
     let editor = app.global::<Editor>();
+
+    // ── Komunta's montage sheet and its Settings page ──
+    app.on_montaje_open(on_window!(|state| {
+        state.handle(Msg::Montaje(MontajeMsg::Open));
+    }));
+    app.on_montaje_close(on_window!(|state| {
+        state.handle(Msg::Montaje(MontajeMsg::Close));
+    }));
+    app.on_montaje_text(on_window!(
+        |state, field: SharedString, value: SharedString| {
+            state.handle(Msg::Montaje(MontajeMsg::TextEdited(
+                field.to_string(),
+                value.to_string(),
+            )));
+        }
+    ));
+    app.on_montaje_choice(on_window!(|state, field: SharedString, value: i32| {
+        state.handle(Msg::Montaje(MontajeMsg::Choice(field.to_string(), value)));
+    }));
+    app.on_montaje_action(on_window!(|state, name: SharedString| {
+        state.handle(Msg::Montaje(MontajeMsg::Action(name.to_string())));
+    }));
+    app.on_montaje_setting_text(on_window!(
+        |state, field: SharedString, value: SharedString| {
+            state.handle(Msg::Montaje(MontajeMsg::SettingEdited(
+                field.to_string(),
+                value.to_string(),
+            )));
+        }
+    ));
+    app.on_montaje_setting_choice(on_window!(|state, field: SharedString, value: i32| {
+        state.handle(Msg::Montaje(MontajeMsg::SettingChoice(
+            field.to_string(),
+            value,
+        )));
+    }));
+    app.on_montaje_setting_action(on_window!(|state, name: SharedString| {
+        state.handle(Msg::Montaje(MontajeMsg::SettingAction(name.to_string())));
+    }));
+
+    // ── Komunta's script pane ──
+    let guion = app.global::<GuionPanel>();
+    guion.on_resized(on_window!(|state, columns: i32| {
+        state.handle(Msg::Guion(GuionMsg::Resized(columns)));
+    }));
+    guion.on_word_toggled(on_window!(|state, take: i32, word: i32| {
+        state.handle(Msg::Guion(GuionMsg::WordToggled(take, word)));
+    }));
+    guion.on_take_removed(on_window!(|state, take: i32| {
+        state.handle(Msg::Guion(GuionMsg::TakeRemoved(take)));
+    }));
+    guion.on_take_moved(on_window!(|state, take: i32, by: i32| {
+        state.handle(Msg::Guion(GuionMsg::TakeMoved(take, by)));
+    }));
+    guion.on_caption_edited(on_window!(|state, index: i32, text: SharedString| {
+        state.handle(Msg::Guion(GuionMsg::CaptionEdited(index, text.to_string())));
+    }));
+    guion.on_caption_removed(on_window!(|state, index: i32| {
+        state.handle(Msg::Guion(GuionMsg::CaptionRemoved(index)));
+    }));
+    guion.on_resource_removed(on_window!(|state, index: i32| {
+        state.handle(Msg::Guion(GuionMsg::ResourceRemoved(index)));
+    }));
+    guion.on_revert(on_window!(|state| {
+        state.handle(Msg::Guion(GuionMsg::Revert));
+    }));
+    guion.on_apply(on_window!(|state| {
+        state.handle(Msg::Guion(GuionMsg::Apply));
+    }));
 
     // ── the launch screen ──
     app.on_start_compose(on_window!(|state| {

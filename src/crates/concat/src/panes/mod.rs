@@ -17,8 +17,10 @@
 pub mod captions;
 pub mod export;
 pub mod glide;
+pub mod guion;
 pub mod media_bin;
 pub mod monitor;
+pub mod montaje;
 pub mod pace;
 pub mod project;
 pub mod relink;
@@ -56,6 +58,10 @@ pub enum Msg {
     Voiceover(voiceover::VoiceoverMsg),
     /// To the library's Audio page.
     Sounds(sounds::SoundsMsg),
+    /// To Komunta's "Nuevo montaje" sheet and its Settings page.
+    Montaje(montaje::MontajeMsg),
+    /// To Komunta's "Guion de montaje" pane.
+    Guion(guion::GuionMsg),
 }
 
 /// What a message says in the log: the activity trail of what the person
@@ -68,9 +74,11 @@ pub enum Msg {
 pub fn activity(msg: &Msg) -> Option<Activity> {
     use captions::CaptionsMsg;
     use export::ExportMsg;
+    use guion::GuionMsg;
     use log::Level::{Debug, Info};
     use media_bin::MediaMsg;
     use monitor::MonitorMsg;
+    use montaje::MontajeMsg;
     use relink::RelinkMsg;
     use settings::SettingsMsg;
     use speech::SpeechMsg;
@@ -87,6 +95,8 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
         | Msg::Export(ExportMsg::Progress { .. })
         | Msg::Captions(CaptionsMsg::Progress(_))
         | Msg::Speech(SpeechMsg::Progress(_))
+        | Msg::Montaje(MontajeMsg::Progress(_))
+        | Msg::Guion(GuionMsg::Resized(_))
         | Msg::Settings(SettingsMsg::ModelProgress { .. } | SettingsMsg::InstallProgress { .. }) => {
             return None;
         }
@@ -94,6 +104,18 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
         // did nothing, and says nothing.
         Msg::Timeline(TimelineMsg::Zoomed { factor, .. }) if (factor - 1.0).abs() < 1e-6 => {
             return None;
+        }
+        // A whole laid-out project is no line for the log.
+        Msg::Guion(GuionMsg::Prepared(result)) => {
+            return Some(Activity::once(
+                Info,
+                match result {
+                    Ok(project) => {
+                        format!("guion: laid out, {} timelines", project.timelines.len())
+                    }
+                    Err(error) => format!("guion: failed, {error}"),
+                },
+            ));
         }
         Msg::Export(ExportMsg::Start) => {
             return Some(Activity::once(Info, "export: started".to_owned()));

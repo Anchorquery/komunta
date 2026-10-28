@@ -23,7 +23,7 @@ import { MediaFilter, MediaItemData, MediaKind, SourcePreview, TextPresetData } 
 import { SoundCardData, Sounds, VoiceCardData } from "workspace/audio-page.slint";
 import { ContextMenu, MenuItemData, MenuRow } from "primitives/context-menu.slint";
 import { ExportData, ExportDialog, ExportPhase } from "dialogs/export.slint";
-import { ModelData, SettingsData, SettingsDialog, SystemFactData } from "dialogs/settings.slint";
+import { ModelData, MontajeSettingsData, SettingsData, SettingsDialog, SystemFactData } from "dialogs/settings.slint";
 import { ProjectDialog, ProjectSheetData } from "dialogs/project.slint";
 import { RelinkDialog, RelinkData, MissingMediaItem } from "dialogs/relink.slint";
 import { ConfirmData, ConfirmDialog } from "dialogs/confirm.slint";
@@ -36,6 +36,8 @@ import { Editor } from "editor.slint";
 import { PaneKind, Panes } from "workspace/pane-switcher.slint";
 import { ChipOption, NewProjectDialog, RecentProjectData, StartData, StartScreen } from "start.slint";
 import { TitleBar } from "title-bar.slint";
+import { MontajeData, MontajeDialog } from "montaje.slint";
+import { GuionBlockData, GuionChipData, GuionPanel, GuionRowData, GuionWordData } from "workspace/guion-pane.slint";
 import { PhoneEditor } from "phone/editor.slint";
 import {
     AppliedEntryData, AppliedParamData, CatalogueEntryData, Library, LibraryViewData,
@@ -66,6 +68,8 @@ export {
     TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
     ChipOption, RecentProjectData, StartData, SystemFactData, ToastData, ProjectSheetData,
     CaptionsSheetData, SpeechSheetData, VoiceoverData, SoundCardData, Sounds, VoiceCardData,
+    MontajeData, MontajeSettingsData,
+    GuionPanel, GuionBlockData, GuionChipData, GuionRowData, GuionWordData,
 }
 
 export component App inherits Window {
@@ -120,7 +124,7 @@ export component App inherits Window {
     }
     property <bool> sheet-open: root.export.open || root.settings.open
         || root.project-sheet.open || root.captions.open || root.speech.open
-        || root.start.composing;
+        || root.start.composing || root.montaje.open;
     changed sheet-open => {
         if (!root.sheet-open) {
             keys.focus();
@@ -139,6 +143,17 @@ export component App inherits Window {
     // bound rather than during the window's own construction.
     in property <bool> on-start: true;
     in property <StartData> start;
+    /// Komunta's "Nuevo montaje" sheet; see montaje.slint.
+    in property <MontajeData> montaje;
+    in property <MontajeSettingsData> montaje-settings;
+    callback montaje-setting-text(field: string, value: string);
+    callback montaje-setting-choice(field: string, value: int);
+    callback montaje-setting-action(name: string);
+    callback montaje-open();
+    callback montaje-close();
+    callback montaje-text(field: string, value: string);
+    callback montaje-choice(field: string, value: int);
+    callback montaje-action(name: string);
     in property <[ChipOption]> start-aspects;
     in property <[ChipOption]> start-sizes;
     in property <[ChipOption]> start-rates;
@@ -595,6 +610,7 @@ export component App inherits Window {
                 can-drop: root.can-drop;
 
                 compose => { root.start-compose(); }
+                montage => { root.montaje-open(); }
                 open => { root.start-open(); }
                 open-settings => { root.open-settings(); }
                 open-recent(path) => { root.start-open-recent(path); }
@@ -787,6 +803,24 @@ export component App inherits Window {
         dismiss-error => { root.start-dismiss-error(); }
     }
 
+    MontajeDialog {
+        fill: root.sheets-fill;
+        inset-top: root.safe-area-insets.top;
+        inset-bottom: root.safe-area-insets.bottom;
+        inset-left: root.safe-area-insets.left;
+        inset-right: root.safe-area-insets.right;
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        data: root.montaje;
+
+        closed => { root.montaje-close(); }
+        text-edited(field, value) => { root.montaje-text(field, value); }
+        choice-changed(field, value) => { root.montaje-choice(field, value); }
+        action(name) => { root.montaje-action(name); }
+    }
+
     ExportDialog {
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -830,6 +864,10 @@ export component App inherits Window {
         height: root.height;
         phone: root.phone;
         data: root.settings;
+        montaje: root.montaje-settings;
+        montaje-edited(field, text) => { root.montaje-setting-text(field, text); }
+        montaje-choice(field, index) => { root.montaje-setting-choice(field, index); }
+        montaje-action(name) => { root.montaje-setting-action(name); }
         transcribers: root.transcribers;
         voices: root.voices;
         versions: root.versions;

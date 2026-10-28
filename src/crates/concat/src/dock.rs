@@ -138,6 +138,20 @@ impl Dock {
         }
     }
 
+    /// Shows `to` in the first seat showing `from`; false when none does.
+    pub fn replace(&mut self, from: PaneKind, to: PaneKind) -> bool {
+        match self {
+            Dock::Leaf(held) if *held == from => {
+                *held = to;
+                true
+            }
+            Dock::Leaf(_) => false,
+            Dock::Split { first, second, .. } => {
+                first.replace(from, to) || second.replace(from, to)
+            }
+        }
+    }
+
     pub fn kind_at(&self, index: usize) -> Option<PaneKind> {
         match self.at(&self.leaf_path(index)?) {
             Dock::Leaf(kind) => Some(*kind),

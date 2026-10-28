@@ -120,6 +120,22 @@ pub struct Preferences {
     /// by Settings › Shortcuts; resolved in [`crate::keymap`].
     #[serde(default)]
     pub keybinds: BTreeMap<String, String>,
+    /// Komunta's montage engine: Settings › Montaje e IA.
+    #[serde(default)]
+    pub montaje: MontajePrefs,
+}
+
+/// Where Komunta's montage engine is and which AI plans with it.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MontajePrefs {
+    /// The engine's folder. None is `KOMUNTA_MOTOR`, or the team's usual
+    /// place under the home folder.
+    pub motor: Option<String>,
+    /// The Python to run it with. None is the engine's own `.venv`.
+    pub python: Option<String>,
+    /// The AI, by the engine's `--ia` name. None is the engine's choice.
+    pub cerebro: Option<String>,
 }
 
 /// The voiceover panel's choices, kept from one take to the next and one
