@@ -7,17 +7,26 @@ Editor de vídeo interno del equipo de comunicación de Komunikia: montaje autom
 ## Estado
 
 - **Fase 0 (esta):** fork de Concat v0.2.8 con otro nombre, icono y color de acento (azul Komunikia), carpeta de ajustes propia (`app.komunta.editor`), instaladores de Windows con identificadores propios y build en GitHub Actions.
-- **Fase 1 (en curso):** `crates/montaje` convierte un trabajo del motor de montaje (`ia/plan.json`, `analisis.json`, `inventario.json`) en un proyecto que Komunta abre y se puede editar. La línea de tiempo da los mismos números que el motor en Python (prueba dorada con trabajos reales).
-- **Siguientes:** pantalla «Nuevo montaje» dentro de la app, el resto del motor en Rust (análisis, transcripción, plan con IA), agente de IA dentro del editor, subtítulos es/eu.
+- **Fase 1 (hecha):** `crates/montaje` convierte un trabajo del motor de montaje (`ia/plan.json`, `analisis.json`, `inventario.json`) en un proyecto que Komunta abre y se puede editar. La línea de tiempo da los mismos números que el motor en Python (prueba dorada con trabajos reales).
+- **Fase 2 (hecha):** recetas editables en lugar de plantillas fijas (subtítulos del documento, de la voz, solo frases clave o ninguno), kit de marca (fuentes, colores, cierre, destello), música con ducking bajo la voz, subtítulos apilados, garabatos y una línea de tiempo por formato (vertical, 16:9, 1:1).
+- **Siguientes:** pantalla «Nuevo montaje» y panel «Guion de montaje» dentro de la app, el resto del motor en Rust (análisis, transcripción, plan con IA), agente de IA dentro del editor, subtítulos es/eu, aparición palabra a palabra.
 
 ### Montaje desde un trabajo del motor
 
 ```sh
 cd src
-cargo run -p montaje -- <carpeta del trabajo> <carpeta del proyecto> [--formato vertical|16x9|1x1]
+cargo run -p montaje -- <carpeta del trabajo> <carpeta del proyecto> [opciones]
 ```
 
-Luego, en Komunta, **Abrir proyecto** y elegir la carpeta del proyecto (o `concat.exe --project <carpeta>`). Pistas, de abajo arriba: voz, recursos, subtítulos, destellos de énfasis, música. Aún no pasa al proyecto: garabatos, subtítulos apilados, aparición palabra a palabra, cierre y destello de marca, ducking de la música.
+| Opción | Qué hace | Por defecto |
+|---|---|---|
+| `--receta <id>` | `mensaje_a_camara`, `voz_en_off`, `entrevista`, `resumen_acto` o una propia | la plantilla del trabajo |
+| `--recetas <carpeta>` | recetas propias del equipo (JSON) | — |
+| `--formatos vertical,16x9,1x1` | una línea de tiempo por formato; el primero es el principal | los de la receta |
+| `--marca <id>` | kit de `marcas/<id>/kit.yaml` | la marca del trabajo |
+| `--marcas <carpeta>` | carpeta `marcas` del motor | dos carpetas por encima del trabajo |
+
+Luego, en Komunta, **Abrir proyecto** y elegir la carpeta del proyecto (o `concat.exe --project <carpeta>`). Cada formato es una línea de tiempo del mismo proyecto. Pistas, de abajo arriba: voz y cierre, destello, recursos, garabatos, subtítulos, palabra gigante de los énfasis, música. Los garabatos se dibujan como PNG en `<proyecto>/montaje/garabatos`. Aún no pasa al proyecto: la aparición palabra a palabra (necesita soporte en el motor de texto).
 
 ## Descargar la build de Windows
 

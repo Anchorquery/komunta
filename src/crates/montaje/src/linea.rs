@@ -43,6 +43,8 @@ pub struct Trozo {
     pub audio: Option<String>,
     /// Speech heard under someone else's picture.
     pub solo_audio: bool,
+    /// Look over the picture.
+    pub efecto: Option<String>,
 }
 
 /// A caption with its times worked out.
@@ -58,6 +60,10 @@ pub struct Sub {
     pub ini: f64,
     /// End on the timeline.
     pub fin: f64,
+    /// Pile group, if the caption piles up with its neighbours.
+    pub apilar: Option<String>,
+    /// Each new line of the pile goes above the last.
+    pub apilar_arriba: bool,
 }
 
 /// B-roll with its times worked out.
@@ -75,8 +81,12 @@ pub struct RecursoLinea {
     pub dur: f64,
     /// Start in the source.
     pub desde: f64,
+    /// Look over the picture.
+    pub efecto: Option<String>,
     /// Hand-drawn mark, if any.
     pub garabato: Option<String>,
+    /// Where the mark goes, as fractions of the frame.
+    pub garabato_pos: [f64; 2],
 }
 
 /// Background music.
@@ -149,6 +159,19 @@ pub fn trozos_de_toma(
     }
     trozos.push((ini, ant.fin + ACOLCHADO_FIN));
     trozos.into_iter().map(|(a, b)| (a.max(0.0), b)).collect()
+}
+
+/// A pile group's key, or None when the value says "no pile" (false, 0,
+/// empty), as Python's truthiness does.
+fn grupo(valor: Option<&serde_json::Value>) -> Option<String> {
+    use serde_json::Value;
+    match valor? {
+        Value::Null | Value::Bool(false) => None,
+        Value::String(texto) if texto.is_empty() => None,
+        Value::String(texto) => Some(texto.clone()),
+        Value::Number(n) if n.as_f64() == Some(0.0) => None,
+        otro => Some(otro.to_string()),
+    }
 }
 
 /// Stretches or shortens a shot so its cut lands on the nearest beat, when
@@ -257,6 +280,7 @@ pub fn construir_linea(trabajo: &Trabajo) -> Result<Linea, Error> {
                 imagen: es_imagen,
                 audio: Some(toma.audio.clone().unwrap_or_else(|| "silencio".to_owned())),
                 solo_audio: false,
+                efecto: toma.efecto.clone(),
             });
             m.push((a, a + dur, t));
             t += dur;
@@ -278,6 +302,7 @@ pub fn construir_linea(trabajo: &Trabajo) -> Result<Linea, Error> {
                 imagen: false,
                 audio: None,
                 solo_audio: toma.solo_audio,
+                efecto: toma.efecto.clone(),
             });
             m.push((a, b, t));
             t += b - a;
@@ -339,6 +364,8 @@ pub fn construir_linea(trabajo: &Trabajo) -> Result<Linea, Error> {
             posicion: s.posicion.clone().unwrap_or_else(|| "auto".to_owned()),
             ini,
             fin: fin.max(ini + 0.8),
+            apilar: grupo(s.apilar.as_ref()),
+            apilar_arriba: s.apilar_hacia.as_deref() == Some("arriba"),
         });
     }
     // No short gaps and no overlaps between captions.
@@ -386,7 +413,9 @@ pub fn construir_linea(trabajo: &Trabajo) -> Result<Linea, Error> {
             t: t_ini,
             dur,
             desde,
+            efecto: r.efecto.clone(),
             garabato: r.garabato.clone(),
+            garabato_pos: r.garabato_pos.unwrap_or([0.5, 0.45]),
         });
     }
     // No overlaps: each piece ends where the next begins; what is left too
@@ -437,6 +466,7 @@ mod tests {
                 i,
                 ini: *ini,
                 fin: *fin,
+                ..Palabra::default()
             })
             .collect()
     }

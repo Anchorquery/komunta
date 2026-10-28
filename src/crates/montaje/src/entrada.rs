@@ -46,6 +46,8 @@ pub struct Toma {
     pub audio: Option<String>,
     /// The take is only heard; its picture is covered.
     pub solo_audio: bool,
+    /// Look over the picture: "bn" is black and white.
+    pub efecto: Option<String>,
 }
 
 impl Toma {
@@ -75,6 +77,11 @@ pub struct Subtitulo {
     pub estilo: Option<String>,
     /// "auto", "arriba", "centro" or "abajo".
     pub posicion: Option<String>,
+    /// Consecutive captions with the same group pile up on screen until
+    /// the last one ends (lists).
+    pub apilar: Option<serde_json::Value>,
+    /// "arriba" when each new line of a pile goes above the last.
+    pub apilar_hacia: Option<String>,
 }
 
 /// A piece of B-roll, anchored to a caption, to a word of a take or to a
@@ -96,6 +103,8 @@ pub struct Recurso {
     pub dur: Option<f64>,
     /// Where in the source it starts.
     pub desde_seg: Option<f64>,
+    /// Look over the picture: "bn" is black and white.
+    pub efecto: Option<String>,
     /// Hand-drawn mark over it ("circulo", "corazon", "subrayado").
     pub garabato: Option<String>,
     /// Where the mark goes, as fractions of the frame.
@@ -158,6 +167,10 @@ pub struct Palabra {
     pub ini: f64,
     /// End in the source, in seconds.
     pub fin: f64,
+    /// The word as heard.
+    pub txt: String,
+    /// A filler ("eh", "pues") the analysis spotted.
+    pub coletilla: bool,
 }
 
 /// Face centre, fractions of the picture.

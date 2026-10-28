@@ -11,6 +11,12 @@ concat-project.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+# The engine's brand kits are YAML files the team edits.
+serde_yaml = "0.9"
+# Font names out of the kit's files, to match the kit's font names.
+ttf-parser = "0.25"
+# Hand-drawn marks rasterised to PNG.
+tiny-skia = { version = "0.12", features = ["png-format"] }
 
 [[bin]]
 name = "montaje"
