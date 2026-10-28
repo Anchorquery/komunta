@@ -1,141 +1,56 @@
-<p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/concat-mark-dark.png" alt="Concat" width="100" />
-</p>
+# Komunta
 
-<h1 align="center">Concat</h1>
-<h3 align="center">The free, open-source, cross-platform CapCut replacement.</h3>
+Editor de vídeo interno del equipo de comunicación de Komunikia: montaje automático con IA y edición a mano en la misma app.
 
-<div align="center">
+> **Nombre e icono provisionales.** Komunta es un fork de [Concat](https://github.com/jub0t/concat) (AGPL-3.0-or-later). La marca «Concat» no se usa en las builds modificadas, como pide su [política de marca](TRADEMARK.md). El README original está en [README.concat.md](README.concat.md).
 
-<img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/editor.png" alt="Concat editor" width="100%" />
+## Estado
 
-<p align="center">
-  <a href="https://github.com/jub0t/Concat/releases"><img src="https://img.shields.io/github/downloads/jub0t/concat/total?style=flat&logo=github&logoColor=F8F8F8&label=Downloads&labelColor=212123&color=0568FD" alt="Total Downloads" /></a>
-  <a href="https://github.com/jub0t/Concat/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jub0t/Concat/ci.yml?style=flat&logo=githubactions&logoColor=F8F8F8&label=Build&labelColor=000000" alt="Build Status" /></a>
-  <a href="https://github.com/jub0t/Concat/releases"><img src="https://img.shields.io/badge/Version-0.2.8-0568FD?style=flat&logo=semver&logoColor=F8F8F8&labelColor=212123" alt="Concat Version 0.2.8" /></a>
-  <a href="https://discord.gg/DVuPfpXfqP"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=flat&logo=discord&logoColor=F8F8F8&labelColor=000000" alt="Join Concat Discord" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-0568FD?style=flat&logo=gnu&logoColor=F8F8F8&labelColor=212123" alt="License: AGPL-3.0-or-later" /></a>
-</p>
+- **Fase 0 (esta):** fork de Concat v0.2.8 con otro nombre, icono y color de acento (azul Komunikia), carpeta de ajustes propia (`app.komunta.editor`), instaladores de Windows con identificadores propios y build en GitHub Actions.
+- **Siguientes:** pantalla «Nuevo montaje», motor de montaje portado a Rust (`crates/montaje`), agente de IA dentro del editor, subtítulos es/eu.
 
-<p align="center">
-  <a href="https://www.star-history.com/jub0t/concat"><img src="https://api.star-history.com/badge?repo=jub0t/concat&type=rank" alt="Star History Rank" height="62" /></a>
-  <a href="https://concatenate.pages.dev/#download"><img src="assets/download_button.svg" alt="Download Concat" width="251" /></a>
-</p>
+## Descargar la build de Windows
 
-**🇬🇧 English** · [🇩🇪 Deutsch](docs/README.de.md) · [🇪🇸 Español](docs/README.es.md) · [🇫🇷 Français](docs/README.fr.md) · [🇮🇹 Italiano](docs/README.it.md) · [🇳🇱 Nederlands](docs/README.nl.md) · [🇵🇱 Polski](docs/README.pl.md) · [🇧🇷 Português (Brasil)](docs/README.pt-BR.md) · [🇷🇺 Русский](docs/README.ru.md) · [🇺🇦 Українська](docs/README.uk.md) · [🇹🇷 Türkçe](docs/README.tr.md) · [🇭🇷 Hrvatski](docs/README.hr.md) · [🇮🇩 Bahasa Indonesia](docs/README.id.md) · [🇻🇳 Tiếng Việt](docs/README.vi.md) · [🇹🇭 ไทย](docs/README.th.md) · [🇯🇵 日本語](docs/README.ja.md) · [🇰🇷 한국어](docs/README.ko.md) · [🇨🇳 简体中文](docs/README.zh-Hans.md) · [🇹🇼 繁體中文](docs/README.zh-TW.md) · [🇸🇦 العربية](docs/README.ar.md) · [🇮🇱 עברית](docs/README.he.md) · [🇮🇷 فارسی](docs/README.fa.md) · [🇮🇳 हिन्दी](docs/README.hi.md) · [🇵🇰 اردو](docs/README.ur.md) · [🇧🇩 বাংলা](docs/README.bn.md)
+Pestaña **Actions** → workflow **Komunta (Windows)** → última ejecución en verde → artefacto **Komunta-windows-x86_64**. Dentro van el instalador `Komunta-<versión>-windows-x86_64-setup.exe` y el `.msi`.
 
-## Paid Sponsors
+La build no está firmada: si Windows SmartScreen la para, **Más información** → **Ejecutar de todas formas**.
 
-<table width="100%">
-  <tr>
-    <td align="center">
-      <a href="https://proxyon.io/?ref=concat"><img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/proxyon_sponsor_logo.png" alt="Proxyon" width="80" /></a><br />
-      <a href="https://proxyon.io/?ref=concat"><b>Proxyon</b></a><br />
-      <sub>Pay-as-you-go proxies for developers<br />Use code <code>JUB0T</code> for 20% off</sub>
-    </td>
-  </tr>
-</table>
+Para lanzar una build a mano: Actions → Komunta (Windows) → **Run workflow**.
 
-</div>
+## Compilar en local
 
-
-## About
-
-Concat is a free, open-source video editor and a CapCut alternative for macOS, Windows, Linux and Android. It covers what people actually open CapCut for: auto-captions, text-to-speech, background removal, keyframe animation, effects and titles, multi-track cutting, 4K export. With none of the catches: no watermark, no account, no subscription, no upload.
-
-Everything runs locally on a native Rust engine with a GPU compositor. Install it, drop in footage, cut. The AI models for captions, voices and cutout download once from Settings and work offline after that. Your footage never leaves your disk.
-
-**Good for:** TikTok, Reels and Shorts, YouTube videos, tutorials and screen recordings, podcast clips, memes.
-
-**Also for machines:** a built-in MCP server for AI agents (`concat --mcp`, [set up](docs/MCP.md)) and a JSON-RPC API for scripts, so they can cut video with it too.
-
-## Highlights
-
-- 🚫 **No watermarks. No account. No paywall.** Ever.
-- 🔒 **100% local.** Nothing uploads. Works offline.
-- 💬 **Auto-captions.** Local Whisper. Pick a model size, get styled captions on the timeline.
-- 🗣️ **Text-to-speech + voice cloning.** Free local voices, or any voice from a few seconds of a recording.
-- 🧍 **Background removal.** People, objects, or paint the mask yourself.
-- 🎞️ **Keyframes.** Position, scale, rotation, opacity, volume, effect parameters. Curve editor built in.
-- ✨ **100 effects, filters and transitions.** GPU-rendered, live in the preview.
-- ✂️ **Cut fast.** Split, trim, ripple, merge, freeze frame, speed. Magnetic timeline if you want it.
-- 🎚️ **Multi-track, multi-timeline.** Several cuts in one project. Blend modes, crop, flips.
-- 📝 **Titles.** Fonts, stroke, shadow, background plate. Presets to start from.
-- 🎙️ **One-switch voice cleanup.** Denoise, enhance voice, level the loudness. Plus chipmunk, robot, telephone and friends.
-- 📤 **Export.** H.264, HEVC, AV1. Up to 4K 60, 10-bit colour.
-- 🦀 **Native Rust engine.** GPU compositor, proxies, hardware decode. 4K scrubs smoothly.
-- 🤖 **Scriptable.** An MCP server built in, so Claude and other AI agents can edit with it ([one line to set up](docs/MCP.md)), and a JSON-RPC API for scripts. A build from source adds gRPC and a command-line tool.
-- 🖥️ **macOS, Windows, Linux, Android.** 25 languages. Same app, same project files.
-
-## Download
-
-Two ways in:
-
-1. **[The website](https://concatenate.pages.dev/#download)** hands you the right build for your machine. Start here.
-2. **[GitHub Releases](https://github.com/jub0t/Concat/releases)** has every build for every platform, with installers, packages and checksums. For when you want to pick.
-
-Concat is in **beta**: it works, and it still has edges. [Say so](https://github.com/jub0t/Concat/issues) when you find one.
-
-**Platforms**
-
-- ✅ **Windows** · x86_64 (ARM builds are paused, see [#326](https://github.com/jub0t/Concat/issues/326)). A setup and an `.msi`. If SmartScreen stops an unsigned build: **More info** › **Run anyway**
-- ✅ **macOS** · Intel and Apple silicon. If macOS refuses to open an unsigned build: `xattr -dr com.apple.quarantine /Applications/Concat.app`
-- ✅ **Linux** · x86_64 and ARM. `.deb`, `.rpm`, `.AppImage` and an Arch package. Also a Flatpak on **[Flatpark](https://flatpark.org/apps/app.concat.editor/)**, a community Flatpak remote that wraps the x86_64 `.deb` of each release and updates with it
-- ✅ **Android** · phones and tablets
-- ✅ **iOS / iPadOS** · iPhone and iPad, sideloaded
-
-✅ Supported · 🚧 Work in progress · 🧪 To be tested
-
-**System requirements** and the optional model sizes are on [the website](https://concatenate.pages.dev/guides/system-requirements).
-
-**[Code signing policy](CODE_SIGNING.md)**: why the Windows builds are not signed yet, and what Concat sends over the network (nothing you did not ask for).
-
-## Build from source
-
-You need Rust 1.93 or newer (see `rust-version` in `src/Cargo.toml`), the FFmpeg 7+ development libraries, cmake and a C++ compiler.
-
-- **macOS:** `brew install ffmpeg`
-- **Windows:** from [FFmpeg's Windows downloads](https://ffmpeg.org/download.html#build-windows), take BtbN's `win64-gpl-shared` build (the one CI uses), unpack it and point `FFMPEG_DIR` at it
-- **Linux:** use your distro's FFmpeg if it is version 7 or newer, otherwise use a BtbN `shared` build with `FFMPEG_DIR` like on Windows
-
-Then:
+Igual que el original (ver [README.concat.md](README.concat.md#build-from-source)): Rust 1.93+, FFmpeg 7+ (BtbN `win64-gpl-shared` con `FFMPEG_DIR`), cmake y Visual Studio 2022 Build Tools. Ocupa entre 20 y 30 GB.
 
 ```sh
 cd src
-cargo run -p concat          # the editor window
+cargo run -p concat
 ```
 
-Other useful commands:
+Los crates internos conservan el nombre `concat-*` a propósito, para poder traer mejoras del original sin conflictos.
+
+## Traer mejoras de Concat
 
 ```sh
-cargo build --profile app -p concat   # the shipping binary (fat LTO, stripped)
-cargo test                            # run the test suite
-cargo fmt --check && cargo clippy --all-targets -- -D warnings   # what CI checks
+git fetch upstream --tags
+git merge v0.2.9   # o la versión que toque
 ```
 
-If you change text the interface shows, run `python3 scripts/locales.py` from the repo root so the string inventory stays in sync. Full details live in [CONTRIBUTING.md](CONTRIBUTING.md).
+El remoto `upstream` apunta a `jub0t/concat` y tiene el push desactivado.
 
-## How to Contribute
+## Cambios respecto a Concat
 
-> [!IMPORTANT]
-> The best way to contribute is to grab a build from the [Releases](https://github.com/jub0t/Concat/releases) page and use it: find where it breaks, and say where it could be better.
->
-> Ready to write code? [CONTRIBUTING.md](./CONTRIBUTING.md) covers setup, the layout of the tree, the checks to run, and how contributions are licensed. Driving Concat from a script, a service or an agent? [The developer docs](https://concatenate.pages.dev/docs) cover the Concat API and its transports: JSON-RPC and gRPC; [docs/MCP.md](docs/MCP.md) connects an AI agent over MCP. [This Discussion](https://github.com/jub0t/Concat/discussions/3) is where the project was announced.
-> 
-> Contributors can claim a `@Contributor` role in the Discord server: just ask.
+| Qué | Dónde |
+|---|---|
+| Nombre en ventana, textos (25 idiomas), carpeta de proyectos por defecto | `src/crates/concat/ui/app.slint`, `locales/*.json`, `panes/start.rs`, `platform.rs` |
+| Carpeta de ajustes y modelos: `app.komunta.editor` | `src/crates/concat-host/src/dirs.rs` |
+| Actualizaciones y enlaces apuntan a este repo | `concat-host/src/updates.rs`, `panes/start.rs` |
+| Acento por defecto azul Komunikia | `ui/theme/light.slint`, `ui/theme/dark.slint` |
+| Icono | `assets/icons/`, `assets/concat-*.png` |
+| Instaladores con nombre e identificadores propios | `assets/windows/concat.iss`, `concat.wxs` |
+| CI solo Windows, sin disparadores automáticos en los demás workflows | `.github/workflows/` |
 
-## Star History
+Los modelos (Whisper, voces, recorte) se siguen descargando de las publicaciones de Concat.
 
-<a href="https://www.star-history.com/?repos=jub0t%2Fconcat&type=date&releases=&legend=bottom-right">
- <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=jub0t/concat&type=date&legend=bottom-right" />
-</a>
+## Licencia
 
-## Contributors
-
-<a href="https://github.com/jub0t/Concat/graphs/contributors">
-  <img alt="Contributors" src="https://contrib.rocks/image?repo=jub0t/concat">
-</a>
-
-## DMCA
-
-If you believe something in this repository, its releases, or a package or model it distributes infringes your copyright, email [jub0trd@gmail.com](mailto:jub0trd@gmail.com) with a description of the work you own, a link to where the infringing material appears here, your contact details, a statement that you believe in good faith the use is not authorised by you, your agent, or the law, and a statement, under penalty of perjury, that the notice is accurate and that you are the owner or authorised to act for the owner, signed with your physical or electronic signature; valid notices are acted on promptly, and anyone whose material is removed may send a counter-notice to the same address.
+AGPL-3.0-or-later, igual que Concat. Mientras el uso sea interno no obliga a publicar nada. **Si la app se entrega a terceros** (clientes, ayuntamientos), hay que darles también el código fuente.

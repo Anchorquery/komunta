@@ -1,0 +1,27 @@
+# Komunta: el instalador de Windows (setup .exe y .msi) en cada push a main
+# y a mano desde la pestaña Actions. Reutiliza build-app.yml del original,
+# recortado a Windows x86_64. Los instaladores quedan como artefacto
+# «Komunta-windows-x86_64» de la ejecución.
+name: Komunta (Windows)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "audit/**"
+  workflow_dispatch:
+
+# Un push nuevo a main deja sin efecto la build anterior que siga en marcha.
+concurrency:
+  group: komunta-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    uses: ./.github/workflows/build-app.yml
+    secrets: inherit

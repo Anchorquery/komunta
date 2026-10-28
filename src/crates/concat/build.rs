@@ -79,11 +79,11 @@ fn main() {
         // build, where the default would be the crate's lower-case name.
         winresource::WindowsResource::new()
             .set_icon(icon)
-            .set("ProductName", "Concat")
-            .set("FileDescription", "Concat")
+            .set("ProductName", "Komunta")
+            .set("FileDescription", "Komunta")
             .set(
                 "LegalCopyright",
-                "Copyright 2026 Jareer and Concat contributors, AGPL-3.0-or-later",
+                "Copyright 2026 Jareer and Concat contributors; Komunta changes by Komunikia. AGPL-3.0-or-later",
             )
             .compile()
             .expect("could not embed the Windows icon");

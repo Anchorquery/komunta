@@ -62,7 +62,7 @@ const INSTRUCTIONS: &str = "Concat is a video editor; these tools edit its proje
 fn server_info() -> Value {
     json!({
         "name": "concat",
-        "title": "Concat",
+        "title": "Komunta",
         "version": env!("CARGO_PKG_VERSION"),
     })
 }

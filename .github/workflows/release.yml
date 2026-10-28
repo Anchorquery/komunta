@@ -24,8 +24,7 @@ name: Release
 # the files - and publishes it from the Releases page; nothing reaches
 # the updater or the downloads page before then.
 on:
-  push:
-    tags: ["v*"]
+  # Komunta: sin disparadores automáticos para no gastar minutos del repo privado.
   workflow_dispatch:
     inputs:
       tag:

@@ -9,9 +9,7 @@ name: CI
 # The prebuilt libraries the jobs download are pinned the same way, by
 # digest, in scripts/ci/deps.lock.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Komunta: sin disparadores automáticos para no gastar minutos del repo privado.
   workflow_dispatch:
   # release.yml runs this before it builds anything: a tag on a red tree
   # is not a release. It names the tag, because a release started by hand

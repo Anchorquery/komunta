@@ -115,42 +115,8 @@ jobs:
         include:
           # `ffmpeg` and `sherpa` name the target the way each project's
           # release archives do.
-          - platform: macos
-            arch: arm64
-            os: macos-15
-            target: aarch64-apple-darwin
-            sherpa: osx-arm64
-          - platform: macos
-            arch: x86_64
-            os: macos-15-intel
-            target: x86_64-apple-darwin
-            sherpa: osx-x64
-            # No `ggml` row: built as 0.2.7 was, with no AVX2. This bundle
-            # runs on macOS 12 again, and so on the 2013 Mac Pro, whose Ivy
-            # Bridge has AVX and nothing newer; Intel Macs are about one
-            # download in a hundred, and slower captions there beat a crash.
-          # 22.04, not latest: the binary links the build machine's glibc,
-          # so the oldest supported runner is what keeps it runnable on
-          # older distributions.
-          - platform: linux
-            arch: x86_64
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            ffmpeg: linux64
-            sherpa: linux-x64
-            ort: x64
-            nfpm: amd64
-            appimage: x86_64
-            ggml: variants
-          - platform: linux
-            arch: aarch64
-            os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-            ffmpeg: linuxarm64
-            sherpa: linux-aarch64
-            ort: aarch64
-            nfpm: arm64
-            appimage: aarch64
+          # Komunta: solo Windows x86_64. Las filas de macOS y Linux del original
+          # se quitan para no gastar minutos; se recuperan de upstream si hacen falta.
           - platform: windows
             arch: x86_64
             os: windows-2022
@@ -1158,6 +1124,10 @@ jobs:
           Sign "stage\$name.msi"
           # The folder itself is not published: the two installers are.
           Remove-Item -Recurse -Force "stage\$name"
+          # Komunta: los instaladores con el nombre de la app.
+          $komunta = "Komunta-$env:VERSION-windows-${{ matrix.arch }}"
+          Rename-Item "stage\$name-setup.exe" "$komunta-setup.exe"
+          Rename-Item "stage\$name.msi" "$komunta.msi"
 
       # The signing certificate out of the user's store again, whether the
       # steps above passed or not.
@@ -1168,6 +1138,6 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: Concat-${{ matrix.platform }}-${{ matrix.arch }}
+          name: Komunta-${{ matrix.platform }}-${{ matrix.arch }}
           path: stage/*
           if-no-files-found: error
