@@ -251,6 +251,15 @@ pub fn t(key: &str) -> String {
         .unwrap_or_else(|| key.to_owned())
 }
 
+/// [`t`] for a key that may not be listed - a name that comes from a
+/// table outside the catalogue - with `fallback` where [`t`] would give
+/// the key back.
+pub fn t_or(key: &str, fallback: &str) -> String {
+    translated(key)
+        .or_else(|| english().by_key.get(key).cloned())
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
 /// The active language's line for `key`, if it has one.
 fn translated(key: &str) -> Option<String> {
     active()

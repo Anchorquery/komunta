@@ -42,13 +42,19 @@ struct KnownModel {
     /// check against is refused. See [`concat_host::models`].
     sha256: &'static str,
     english_only: bool,
+    /// Where the file is published, when that is not the official
+    /// `ggerganov/whisper.cpp` conversions: a fine-tune for one language,
+    /// pinned to a commit so the digest above keeps meaning it.
+    upstream: Option<&'static str>,
 }
 
 /// The models the settings panel offers, fastest first.
 ///
-/// All from the official `ggerganov/whisper.cpp` conversions. Nothing bigger
-/// than `small`: `medium` is 1.5 GB and minutes-per-minute on CPU, which is
-/// the opposite of what this feature is for.
+/// From the official `ggerganov/whisper.cpp` conversions, but for the
+/// Basque fine-tune. Up to `small` for captions, which want speed; the
+/// large ones are for Komunta's montage, which reads every word of a shoot
+/// and where a misheard name or a Basque sentence taken for Spanish costs
+/// a cut. `medium` is skipped: no better than `large-v3-turbo`, and slower.
 const KNOWN_MODELS: &[KnownModel] = &[
     KnownModel {
         id: "tiny.en",
@@ -57,6 +63,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         approx_bytes: 77_704_715,
         sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
         english_only: true,
+        upstream: None,
     },
     KnownModel {
         id: "tiny",
@@ -65,6 +72,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         approx_bytes: 77_691_713,
         sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
         english_only: false,
+        upstream: None,
     },
     KnownModel {
         id: "base.en",
@@ -73,6 +81,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         approx_bytes: 147_964_211,
         sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
         english_only: true,
+        upstream: None,
     },
     KnownModel {
         id: "base",
@@ -81,6 +90,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         approx_bytes: 147_951_465,
         sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
         english_only: false,
+        upstream: None,
     },
     KnownModel {
         id: "small.en",
@@ -89,14 +99,48 @@ const KNOWN_MODELS: &[KnownModel] = &[
         approx_bytes: 487_614_201,
         sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
         english_only: true,
+        upstream: None,
     },
     KnownModel {
         id: "small",
         label: "Small (Multilingual)",
-        blurb: "Best quality offered, any language.",
+        blurb: "Better wording, any language; a few times slower.",
         approx_bytes: 487_601_967,
         sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
         english_only: false,
+        upstream: None,
+    },
+    KnownModel {
+        id: "large-v3-turbo-q5_0",
+        label: "Large v3 Turbo (Multilingual)",
+        blurb: "Near Large's wording at several times its speed.",
+        approx_bytes: 574_041_195,
+        sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        english_only: false,
+        upstream: None,
+    },
+    KnownModel {
+        id: "large-v3-q5_0",
+        label: "Large v3 (Multilingual)",
+        blurb: "The most accurate, any language. Wants a GPU.",
+        approx_bytes: 1_081_140_203,
+        sha256: "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
+        english_only: false,
+        upstream: None,
+    },
+    KnownModel {
+        id: "large-v3-eu",
+        label: "Large v3 (Basque)",
+        blurb: "Large v3 trained further on Basque speech.",
+        approx_bytes: 3_095_033_483,
+        sha256: "dae98a83f5450d1a26632430649633842f0b6e535c246baa5b46b962bedf8cab",
+        english_only: false,
+        // xezpeleta's fine-tune (Apache-2.0), as he publishes it for
+        // whisper.cpp.
+        upstream: Some(
+            "https://huggingface.co/xezpeleta/whisper-large-v3-eu/resolve/\
+             777215db96c21e4f840784558f2714f12c83397a/ggml-large-v3.eu.bin",
+        ),
     },
 ];
 
@@ -113,9 +157,15 @@ fn model_archive(id: &str) -> String {
 /// fallback fetches is pinned to it, so `main` moving on changes nothing.
 const UPSTREAM_COMMIT: &str = "5359861c739e955e79d9a303bcbc70fb988958b1";
 
-/// Where the mirror was filled from, and the second place a download tries.
+/// Where the mirror was filled from, and the second place a download tries:
+/// the model's own publisher, or the official conversions.
 fn model_upstream(id: &str) -> String {
-    format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/{UPSTREAM_COMMIT}/ggml-{id}.bin")
+    match known(id).and_then(|model| model.upstream) {
+        Some(url) => url.to_owned(),
+        None => format!(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/{UPSTREAM_COMMIT}/ggml-{id}.bin"
+        ),
+    }
 }
 
 /// Where downloaded models live: `<app data>/whisper-models/ggml-<id>.bin`.
@@ -590,7 +640,15 @@ mod tests {
         for model in KNOWN_MODELS {
             let file = model_archive(model.id);
             assert_eq!(file, format!("ggml-{}.bin", model.id));
-            assert!(model_upstream(model.id).ends_with(&file));
+            match model.upstream {
+                // A fine-tune's publisher names the file as he likes; the
+                // pin to a commit is what keeps the digest meaning it.
+                Some(url) => {
+                    assert_eq!(model_upstream(model.id), url);
+                    assert!(url.contains("/resolve/") && !url.contains("/resolve/main/"));
+                }
+                None => assert!(model_upstream(model.id).ends_with(&file)),
+            }
             let sources = concat_host::models::sources(&file, &model_upstream(model.id));
             let (mirror, upstream) = (&sources[0], &sources[1]);
             assert!(mirror.contains(concat_host::models::RELEASE));

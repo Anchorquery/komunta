@@ -23,7 +23,7 @@ use slint::{ModelRc, SharedString, VecModel};
 
 use crate::close_window;
 use crate::host::{on_ui, spawn};
-use crate::i18n::{self, t, tf};
+use crate::i18n::{self, t, t_or, tf};
 use crate::keymap;
 use crate::panes::Msg;
 use crate::platform;
@@ -713,15 +713,17 @@ impl SettingsPane {
                         downloading.get(&model.id).copied().unwrap_or((None, false));
                     ModelState {
                         id: model.id.clone(),
-                        name: model.label.clone(),
-                        note: model.blurb.clone(),
+                        name: t_or(&model_key("transcriber.model", &model.id), &model.label),
+                        note: t_or(&model_key("transcriber.note", &model.id), &model.blurb),
                         megabytes: model.size_bytes as f32 / 1_000_000.0,
                         accuracy: if model.id.starts_with("tiny") {
                             2
                         } else if model.id.starts_with("base") {
                             3
-                        } else {
+                        } else if model.id.starts_with("small") {
                             4
+                        } else {
+                            5
                         },
                         installed: model.downloaded,
                         active: chosen_transcriber.as_deref() == Some(model.id.as_str()),
@@ -990,9 +992,42 @@ pub fn new_token() -> String {
     format!("{:016x}{:016x}", word(1), word(2))
 }
 
+/// The catalogue key for a model's line: `area` and the model's id in
+/// lowerCamelCase, the shape every key has - `large-v3-q5_0` is
+/// `largeV3Q50`, `tiny.en` is `tinyEn`.
+fn model_key(area: &str, id: &str) -> String {
+    let mut name = String::new();
+    for (index, word) in id
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .enumerate()
+    {
+        let mut letters = word.chars();
+        if let Some(first) = letters.next() {
+            if index == 0 {
+                name.extend(first.to_lowercase());
+            } else {
+                name.extend(first.to_uppercase());
+            }
+            name.push_str(letters.as_str());
+        }
+    }
+    format!("{area}.{name}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_id_becomes_a_catalogue_key() {
+        assert_eq!(model_key("transcriber.model", "tiny.en"), "transcriber.model.tinyEn");
+        assert_eq!(
+            model_key("transcriber.note", "large-v3-turbo-q5_0"),
+            "transcriber.note.largeV3TurboQ50"
+        );
+        assert_eq!(model_key("transcriber.model", "large-v3-eu"), "transcriber.model.largeV3Eu");
+    }
 
     #[test]
     fn a_token_is_thirty_two_hex_digits_and_never_the_same_twice() {
