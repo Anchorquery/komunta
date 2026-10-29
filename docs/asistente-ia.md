@@ -27,7 +27,7 @@ Alcance: un asistente dentro de Komunta que ayude en todo el flujo (montar con I
 
 Proveedor recomendado por defecto: **Anthropic** (Sonnet 5.5 para el chat, Opus 5.5 para el plan), con **Gemini gratuito** como respaldo barato y **Claude Code** para quien prefiera la suscripción. Pero ningún proveedor es obligatorio, y el juego de pruebas de la fase F6 decide con datos cuál va mejor en cada tarea y en euskera.
 
-Esfuerzo: **≈10-12 semanas** de una persona hasta tener todo el flujo con los siete modos; algo útil (chat con Anthropic que edita la línea de tiempo) en ≈3-4.
+Esfuerzo: **≈10-13 semanas** de una persona hasta tener todo el flujo con los siete modos; algo útil (chat con Anthropic que edita la línea de tiempo) en ≈3-4.
 
 ---
 
@@ -356,7 +356,7 @@ Las CLIs no usan clave: usan la sesión iniciada de cada una (`claude auth login
 | **F1. Núcleo y Anthropic** | Crate `asistente`: historial neutro, bucle, catálogo común, contexto; adaptador Anthropic; panel `PaneKind.asistente`; herramientas ★; `preview_frame`; claves. | 2-3 semanas | Chat que edita la línea de tiempo con Claude. |
 | **F2. OpenAI, Google y respaldo** | Adaptadores OpenAI y Gemini (esquemas, imágenes); cadena de respaldo y port de `cuota.py`; etiqueta «apto para clientes»; preferencia compartida con el panel Montaje. | 1,5-2 semanas | Los tres proveedores API intercambiables. |
 | **F3. Guion** | Herramientas del guion (5.4) sobre `PlanCrudo`, con versiones; cambios visibles en el panel Guion; `guion_aplicar` con `graft`; «corregir hablando» sustituye a `edicion.py`. | 1,5-2 semanas | Revisión entera desde el chat. |
-| **F4. Montaje, recetas y kits** | `proyecto_nuevo` con IA, `montar`, `rehacer`, estado y cancelar; herramientas de recetas y kits con `montaje::receta` y `kit`. | 1-1,5 semanas | Del material al montaje hablando con el asistente. |
+| **F4. Montaje, recetas y kits** | `proyecto_nuevo` con IA, `montar`, `rehacer`, estado y cancelar; herramientas de recetas y kits con `montaje::receta` y `kit` (añadiendo `Kit::guardar`). | 1-1,5 semanas | Del material al montaje hablando con el asistente. |
 | **F5. CLIs y voz** | Adaptadores `claude_code`, `codex` y `gemini_cli` vía MCP; comprobación de instalación y sesión; dictado local es/eu; las herramientas nuevas también en `concat-mcp`. | 1,5-2 semanas | Los siete modos funcionando. |
 | **F6. Evaluación continua** | 30-50 pedidos reales (mitad en euskera) pasados con cada proveedor; acierto, nº de turnos y coste por tarea; ajustar la tabla 6.4, descripciones de herramientas y prompt. | 1 semana y luego continuo | Elegir proveedor por defecto con datos. |
 
