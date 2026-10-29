@@ -1,5 +1,6 @@
 //! What a shoot's clips hold, for the montage: who speaks, what is said
-//! word by word and in which language, and how noisy the sound is.
+//! word by word and in which language, how noisy the sound is, and
+//! what the picture shows: how sharp and still, and where the faces are.
 //!
 //! A port of the Python engine's `motor/analisis.py`, module by module.
 //! What it writes is the engine's `analisis.json`, field for field, so the
@@ -13,20 +14,27 @@
 
 #[cfg(feature = "escucha")]
 pub mod audio;
+pub mod caras;
 #[cfg(feature = "escucha")]
 pub mod clip;
 #[cfg(feature = "escucha")]
 pub mod escucha;
 pub mod idioma;
+#[cfg(feature = "imagen")]
+pub mod mirada;
+pub mod musica;
 pub mod palabras;
 pub mod recorte;
 pub mod ruido;
 pub mod tokens;
 pub mod transcripcion;
+pub mod visual;
 pub mod voz;
 
 pub use idioma::{Idioma, Segunda, Tramo};
+pub use musica::Ritmo;
 pub use palabras::{Palabra, PalabraOida};
 pub use ruido::Ruido;
 pub use tokens::TokenOido;
 pub use transcripcion::Transcripcion;
+pub use visual::{Cara, Encuadre, TramoVisual, Visual};

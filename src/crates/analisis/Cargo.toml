@@ -10,13 +10,19 @@ description = "Komunta: what a shoot's clips hold - speech, words, noise - for t
 # The listening half - whisper.cpp and ffmpeg - which the app turns on. Off,
 # the deciding half builds and tests in seconds, with no C toolchain.
 escucha = ["dep:concat-media", "dep:concat-speech", "dep:log", "dep:thiserror", "dep:whisper-rs"]
+# The looking half: the clip's frames, through ffmpeg.
+imagen = ["dep:concat-core", "dep:concat-media", "dep:thiserror"]
+# And the faces in them: YuNet, on ONNX Runtime.
+vision = ["imagen", "dep:concat-vision"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 
+concat-core = { workspace = true, optional = true }
 concat-media = { workspace = true, optional = true }
 concat-speech = { workspace = true, optional = true }
+concat-vision = { workspace = true, optional = true, features = ["infer"] }
 log = { version = "0.4", optional = true }
 thiserror = { workspace = true, optional = true }
 whisper-rs = { version = "0.16", features = ["raw-api"], optional = true }
@@ -27,3 +33,7 @@ workspace = true
 [[example]]
 name = "escuchar"
 required-features = ["escucha"]
+
+[[example]]
+name = "mirar"
+required-features = ["imagen"]

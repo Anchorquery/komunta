@@ -74,6 +74,9 @@ ggml-cpu-x64.dll               16    0     0      0          0
 ggml-cpu-sse42.dll             16    0     0      0          0
 ggml-cpu-sandybridge.dll       16    0     0      0          0
 ggml-cpu-ivybridge.dll         16    0     0      0          0
+ggml-base.dll                  16    0     0      0          0
+# ggml-base held none while whisper-rs-sys left it unoptimised; built at
+# /O2 it calls the same vectorized STL algorithms: 6 vpsravd.
 ggml.dll                       32    0     0      0          0
 whisper.dll                    48    0     0      0          0
 
