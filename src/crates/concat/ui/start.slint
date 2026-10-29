@@ -2391,6 +2391,7 @@ export component NewProjectDialog inherits Modal {
 
         FormRow {
             label: I18n.upper("common.frameRate");
+            last: true;
             stacked: root.narrow;
 
             VerticalLayout {
@@ -2443,10 +2444,6 @@ export component NewProjectDialog inherits Modal {
                 }
             }
         }
-
-        // Komunta: the window's own rows for the project - "Montar con IA"
-        // - go here, under the project's.
-        @children
 
         // The notice, above the button, wrapping to as many lines as the
         // error takes: an elided error is half an error, and on a phone

@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Komunikia
 
-//! Komunta's montage with AI, which is something a project has rather than
-//! a project of its own: the "Montar con IA" part of New project, the
-//! "Montar con IA" / "Rehacer" sheet over an open project, and the
-//! Settings page that says where the engine is.
+//! Komunta's montage with AI, which any project can have rather than a
+//! kind of project: the "Armar montaje" wizard over the open project (from
+//! the title bar, File, or the Montaje pane), and the Settings page that
+//! says where the engine is.
 //!
-//! The sheet's three steps - the material, what the video is for, the
-//! captions and the script - fill the same state New project's section
-//! does. Running it works on the open project: the Python engine reads,
-//! transcribes and asks the AI for the plan ([`montaje::motor`]) on a
-//! worker, the `montaje` crate lays the plan out, and the result joins the
-//! project as new timelines ([`crate::panes::guion::graft`]). Its progress
+//! The wizard's three steps are the material, what the video is for, and
+//! the captions and the script. Running it works on the open project: the
+//! Python engine reads, transcribes and asks the AI for the plan
+//! ([`montaje::motor`]) on a worker, the `montaje` crate lays the plan out,
+//! and the result joins the project as new timelines
+//! ([`crate::panes::guion::graft`]). Its progress
 //! comes back as [`MontajeMsg::Progress`] and shows in the Montaje pane.
 
 use std::path::{Path, PathBuf};
@@ -47,9 +47,10 @@ pub const SETTINGS_PAGE: i32 = 8;
 /// Everything that can happen to the montage.
 #[derive(Debug)]
 pub enum MontajeMsg {
-    /// The sheet, over the open project, for a first montage.
+    /// "Armar montaje": the wizard over the open project, filled in from
+    /// its last montage when it has one.
     Open,
-    /// The sheet, filled in from the open project's last montage.
+    /// The Montaje pane's "Rehacer…": the same.
     Redo,
     Close,
     /// A text field, by name, and what it holds now.
@@ -84,8 +85,6 @@ pub struct MontajePane {
     /// The sheet is redoing the project's montage rather than making one.
     redo: bool,
     step: i32,
-    /// New project's "Montar con IA" is on.
-    pub enabled: bool,
     material: String,
     /// What the material folder holds, worked out when it changes rather
     /// than on every publish.
@@ -122,7 +121,6 @@ impl Default for MontajePane {
             open: false,
             redo: false,
             step: 0,
-            enabled: false,
             material: String::new(),
             material_note: String::new(),
             recipes: with_automatic(receta::de_serie()),
@@ -186,8 +184,7 @@ impl MontajePane {
     /// Applies one message.
     pub fn update(&mut self, msg: MontajeMsg, studio: &mut Studio) {
         match msg {
-            MontajeMsg::Open => self.open_sheet(false, studio),
-            MontajeMsg::Redo => self.open_sheet(true, studio),
+            MontajeMsg::Open | MontajeMsg::Redo => self.open_sheet(studio),
             MontajeMsg::Close => self.open = false,
             MontajeMsg::TextEdited(field, value) => match field.as_str() {
                 "material" => self.set_material(value),
@@ -197,12 +194,6 @@ impl MontajePane {
             MontajeMsg::Choice(field, value) => {
                 let index = value.max(0) as usize;
                 match field.as_str() {
-                    "enabled" => {
-                        self.enabled = value != 0;
-                        if self.enabled {
-                            self.refresh(studio);
-                        }
-                    }
                     "recipe" => {
                         self.recipe = index.min(self.recipes.len().saturating_sub(1));
                         self.from_recipe();
@@ -281,9 +272,9 @@ impl MontajePane {
         }
     }
 
-    /// The sheet over the open project; for a redo, as its last montage
-    /// was asked for.
-    fn open_sheet(&mut self, redo: bool, studio: &Studio) {
+    /// The wizard over the open project; for a project montaged before,
+    /// as its last montage was asked for.
+    fn open_sheet(&mut self, studio: &Studio) {
         let Some(proyecto) = open_project(studio) else {
             return;
         };
@@ -291,14 +282,13 @@ impl MontajePane {
             return;
         }
         self.open = true;
-        self.redo = redo;
         self.step = 0;
         self.error.clear();
         self.refresh(studio);
-        if redo {
-            if let Some(encargo) = Encargo::leer(&proyecto) {
-                self.fill(&encargo);
-            }
+        let last = Encargo::leer(&proyecto);
+        self.redo = last.is_some();
+        if let Some(encargo) = last {
+            self.fill(&encargo);
         }
     }
 
@@ -363,13 +353,6 @@ impl MontajePane {
         self.square = frames.contains(&"1x1");
     }
 
-    /// The one frame a new project's shape asks for.
-    pub fn frame_from(&mut self, width: u32, height: u32) {
-        self.vertical = height > width;
-        self.wide = width > height;
-        self.square = width == height;
-    }
-
     fn action(&mut self, name: &str, studio: &mut Studio) {
         match name {
             "browse-material" => pick(
@@ -394,7 +377,6 @@ impl MontajePane {
             "clear-script" => self.script.clear(),
             "settings" => {
                 self.open = false;
-                studio.handle(Msg::Start(crate::panes::start::StartMsg::Dismiss));
                 studio.handle(Msg::Settings(crate::panes::settings::SettingsMsg::Open));
                 studio.handle(Msg::Settings(
                     crate::panes::settings::SettingsMsg::PageChanged(SETTINGS_PAGE),
@@ -437,7 +419,7 @@ impl MontajePane {
     }
 
     /// Whether a montage could start: the material, and the engine.
-    pub fn ready(&self, studio: &Studio) -> Result<(), String> {
+    fn ready(&self, studio: &Studio) -> Result<(), String> {
         self.check_material()?;
         if !motor(studio).valido() {
             return Err(t("montaje.engineMissing"));
@@ -537,7 +519,6 @@ impl MontajePane {
         let version = Encargo::leer(&proyecto).map_or(0, |e| e.version);
         log::info!("montaje: {} from {}", pedido.id, pedido.material.display());
         self.open = false;
-        self.enabled = false;
         self.busy = true;
         self.running_in = Some(proyecto.clone());
         self.phase = 0;
@@ -616,10 +597,10 @@ impl MontajePane {
         }
     }
 
-    /// The sheet and New project's section as the window draws them.
+    /// The wizard as the window draws it.
     pub fn data(&self, studio: &Studio) -> MontajeData {
-        // Neither up: nothing to draw.
-        if !self.open && !studio.start.composing {
+        // Down, there is nothing to draw.
+        if !self.open {
             return MontajeData::default();
         }
         let engine = motor(studio);
@@ -635,7 +616,6 @@ impl MontajePane {
         MontajeData {
             open: self.open,
             redo: self.redo,
-            enabled: self.enabled,
             step: self.step,
             material: self.material.as_str().into(),
             material_note: if self.material.trim().is_empty() {

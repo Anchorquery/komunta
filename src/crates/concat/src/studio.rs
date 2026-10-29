@@ -887,7 +887,7 @@ pub struct Studio {
     // ── the launch screen ──
     pub on_start: bool,
     pub start: crate::panes::start::StartPane,
-    /// Komunta's montage with AI: New project's section, the sheet, the run.
+    /// Komunta's montage with AI: the "Armar montaje" wizard and the run.
     pub montaje: crate::panes::montaje::MontajePane,
     /// Komunta's Montaje pane: the montage's script.
     pub guion: crate::panes::guion::GuionPane,
@@ -11383,6 +11383,14 @@ impl Studio {
                     t("studio.importMedia"),
                     Glyph::Import,
                     &keymap::label(&self.prefs, "import"),
+                    true,
+                ),
+                // Komunta: the AI montage wizard, for any project.
+                row(
+                    "montage",
+                    t("montaje.buildMenu"),
+                    Glyph::Sparkle,
+                    "",
                     true,
                 ),
                 row(

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Komunikia
 
-// Komunta's montage with AI, which a project has rather than is: the
-// "Montar con IA" section of New project (`MontajeSection`), and the sheet
-// over an open project (`MontajeDialog`) - the material, what the video is
-// for, the captions - for a first montage or to redo one. The run itself
-// shows in the Montaje pane. Both wear the launch screen's clothes - the
-// plain fields, the chip rows, the ink pill.
+// Komunta's "Armar montaje": a wizard over the open project - any project
+// can be montaged with AI - in three steps: the material, what the video
+// is for, the captions and the script. It is filled in again from the
+// project's last montage when it has one. The run itself shows in the
+// Montaje pane. It wears the launch screen's clothes - the plain fields,
+// the chip rows, the ink pill.
 //
 // The state is all Rust's (`panes::montaje`), published whole as
-// `MontajeData`. Both report back through three callbacks: a text field
+// `MontajeData`. It reports back through three callbacks: a text field
 // changed, a choice changed, or an action was pressed, each by name, so the
 // window does not grow a callback per field.
 
@@ -26,8 +26,6 @@ export struct MontajeData {
     open: bool,
     /// The sheet redoes the project's montage.
     redo: bool,
-    /// New project's "Montar con IA" is on.
-    enabled: bool,
     /// 0 material, 1 what it is for, 2 captions and script.
     step: int,
     /// The material folder.
@@ -61,36 +59,6 @@ export struct MontajeData {
     /// A montage is under way.
     busy: bool,
     error: string,
-}
-
-// A switch drawn from Rust's state, as the inspector's is, but with no
-// state of its own to fall out of step with it.
-component Toggle inherits Rectangle {
-    in property <bool> on;
-    callback toggled();
-
-    width: 30px;
-    height: 17px;
-    border-radius: Theme.r-sm;
-    background: root.on ? Theme.accent : Theme.field-active;
-
-    animate background { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
-
-    Rectangle {
-        x: root.on ? parent.width - self.width - 2px : 2px;
-        y: (parent.height - self.height) / 2;
-        width: 13px;
-        height: 13px;
-        border-radius: Theme.r-xs;
-        background: Theme.on-accent;
-
-        animate x { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
-    }
-
-    TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.toggled(); }
-    }
 }
 
 // The captions: as the kind has it, or one way for this video.
@@ -376,7 +344,7 @@ export component MontajeDialog inherits Modal {
     property <bool> can-run: root.can-next && root.data.engine-ok;
 
     open: root.data.open;
-    title: root.data.redo ? I18n.t("montaje.redoTitle") : I18n.t("montaje.montage");
+    title: root.data.redo ? I18n.t("montaje.redoTitle") : I18n.t("montaje.build");
     glyph: Glyph.sparkle;
     surface-width: Math.min(660px, root.width - 32px);
 
@@ -621,144 +589,6 @@ export component MontajeDialog inherits Modal {
                 label: I18n.t("montaje.run");
                 enabled: root.can-run;
                 clicked => { root.action("run"); }
-            }
-        }
-    }
-}
-
-// New project's "Montar con IA": off, one row with its switch; on, what
-// the montage needs, the rest as the sheet's defaults - the frame is the
-// project's shape - and "Rehacer" in the Montaje pane for everything else.
-export component MontajeSection inherits VerticalLayout {
-    in property <MontajeData> data;
-    in property <bool> narrow;
-    /// The project is being made: nothing changes under it.
-    in property <bool> busy;
-    /// The captions and the script are showing.
-    property <bool> more;
-
-    callback text-edited(field: string, value: string);
-    callback choice-changed(field: string, value: int);
-    callback action(name: string);
-
-    FormRow {
-        label: I18n.upper("montaje.withAi");
-        stacked: root.narrow;
-        last: !root.data.enabled;
-
-        HorizontalLayout {
-            spacing: 12px;
-
-            VerticalLayout {
-                alignment: center;
-                Toggle {
-                    on: root.data.enabled;
-                    toggled => {
-                        if (!root.busy) {
-                            Focus.release();
-                            root.choice-changed("enabled", root.data.enabled ? 0 : 1);
-                        }
-                    }
-                }
-            }
-
-            Text {
-                horizontal-stretch: 1;
-                vertical-alignment: center;
-                text: I18n.t("montaje.withAiNote");
-                color: Theme.fg-muted;
-                font-size: Theme.fs;
-                wrap: word-wrap;
-            }
-        }
-    }
-
-    if root.data.enabled: FormRow {
-        label: I18n.upper("montaje.material");
-        stacked: root.narrow;
-
-        MaterialField {
-            material: root.data.material;
-            note: root.data.material-note;
-            edited(text) => { root.text-edited("material", text); }
-            browse => { root.action("browse-material"); }
-        }
-    }
-
-    if root.data.enabled: FormRow {
-        label: I18n.upper("montaje.kind");
-        stacked: root.narrow;
-
-        KindField {
-            data: root.data;
-            changed(index) => { root.choice-changed("recipe", index); }
-        }
-    }
-
-    if root.data.enabled: FormRow {
-        label: I18n.upper("montaje.request");
-        stacked: root.narrow;
-        last: !root.more && root.data.engine-ok;
-
-        VerticalLayout {
-            spacing: 8px;
-
-            PlainInput {
-                text: root.data.request;
-                placeholder: I18n.t("montaje.requestPlaceholder");
-                size: Theme.fs;
-                edited(text) => { root.text-edited("request", text); }
-            }
-
-            // The captions and the script, folded: the sheet is tall
-            // enough with the project's own rows above them.
-            if !root.more: HorizontalLayout {
-                alignment: start;
-                LinkButton {
-                    label: I18n.t("montaje.moreOptions");
-                    clicked => { root.more = true; }
-                }
-            }
-        }
-    }
-
-    if root.data.enabled && root.more: FormRow {
-        label: I18n.upper("montaje.captions");
-        stacked: root.narrow;
-
-        CaptionsChoice {
-            current: root.data.captions;
-            narrow: root.narrow;
-            changed(index) => { root.choice-changed("captions", index); }
-        }
-    }
-
-    if root.data.enabled && root.more: FormRow {
-        label: I18n.upper("montaje.script");
-        stacked: root.narrow;
-        last: root.data.engine-ok;
-
-        ScriptField {
-            script: root.data.script;
-            action(name) => { root.action(name); }
-        }
-    }
-
-    if root.data.enabled && !root.data.engine-ok: HorizontalLayout {
-        padding-top: 4px;
-        padding-bottom: 8px;
-        spacing: 12px;
-
-        Notice {
-            horizontal-stretch: 1;
-            text: root.data.engine-note;
-        }
-
-        VerticalLayout {
-            alignment: center;
-            LinkButton {
-                label: I18n.t("common.settings");
-                clicked => { root.action("settings"); }
             }
         }
     }

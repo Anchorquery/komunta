@@ -10,18 +10,18 @@ Editor de vídeo interno del equipo de comunicación de Komunikia: montaje autom
 - **Fase 1 (hecha):** `crates/montaje` convierte un trabajo del motor de montaje (`ia/plan.json`, `analisis.json`, `inventario.json`) en un proyecto que Komunta abre y se puede editar. La línea de tiempo da los mismos números que el motor en Python (prueba dorada con trabajos reales).
 - **Fase 2 (hecha):** recetas editables en lugar de plantillas fijas (subtítulos del documento, de la voz, solo frases clave o ninguno), kit de marca (fuentes, colores, cierre, destello), música con ducking bajo la voz, subtítulos apilados, garabatos y una línea de tiempo por formato (vertical, 16:9, 1:1).
 - **Fase 3 (hecha):** pantallas dentro de la app y Ajustes › Montaje e IA. Por debajo sigue trabajando el motor en Python.
-- **Fase 3b (hecha):** el montaje es parte del proyecto: «Con IA» en Nuevo proyecto, panel Montaje en cualquier proyecto (montar, progreso, guion, rehacer) y tipo «Automático», en el que la IA elige la receta.
+- **Fase 3b (hecha):** el montaje es parte del proyecto: «Armar montaje» (asistente) en cualquier proyecto, panel Montaje (progreso, guion, rehacer) y tipo «Automático», en el que la IA elige la receta.
 - **Siguientes:** el resto del motor en Rust (análisis, transcripción, plan con IA), «Corregir hablando» y agente de IA dentro del editor, aparición palabra a palabra.
 
 ### Montaje desde la app
 
 1. **Ajustes › Montaje e IA**: carpeta del motor (por defecto `Escritorio/apps/automatizacion_videos`, o la variable `KOMUNTA_MOTOR`), Python (vacío = el `.venv` del motor) y la IA que planifica. Las recetas propias del equipo van en la carpeta que enseña esa página.
-2. **Nuevo proyecto › Con IA**: el montaje es parte del proyecto, no otra cosa. Activa el interruptor y elige la carpeta del material, el tipo de vídeo y «¿Qué quieres?» con tus palabras; en «Más opciones», los subtítulos y un guion opcional. El formato es la forma del proyecto. Al crear, el proyecto se abre y el motor monta en él (unos minutos; puedes seguir trabajando).
+2. **Armar montaje**, en cualquier proyecto: botón de la barra superior (junto a Exportar), **Archivo › Armar montaje con IA…** o el panel Montaje. Abre un asistente de tres pasos: material; tipo de vídeo, «¿Qué quieres?», formatos y marca; subtítulos, guion opcional e idioma. Si el proyecto ya tiene montaje, sale rellenado con lo de la última vez. El motor tarda unos minutos y puedes seguir trabajando.
 3. **Tipo de vídeo › Automático** (por defecto): la IA mira el material y elige ella la receta (mensaje a cámara, voz en off, entrevista, resumen de acto o una propia del equipo). Con subtítulos «Según el tipo» usa los de la receta elegida.
 4. **Panel Montaje** (sale donde estaba la Biblioteca, y está en el menú de paneles de cualquier proyecto):
-   - sin montaje: **Montar con IA** abre los tres pasos (material; tipo, petición, formatos y marca; subtítulos, guion e idioma);
+   - sin montaje: **Armar montaje** abre el asistente;
    - montando: las fases, el progreso y **Cancelar**;
-   - con montaje: el guion. Pulsa una palabra para cortarla, sube, baja o quita tomas, corrige subtítulos y quita recursos. **Aplicar al vídeo** guarda el plan como versión nueva y lo añade como líneas de tiempo nuevas («Montaje 2 · Vertical»…), sin tocar las que ya editaste. **Rehacer…** vuelve a pedir el montaje con lo de la última vez ya rellenado.
+   - con montaje: el guion. Pulsa una palabra para cortarla, sube, baja o quita tomas, corrige subtítulos y quita recursos. **Aplicar al vídeo** guarda el plan como versión nueva y lo añade como líneas de tiempo nuevas («Montaje 2 · Vertical»…), sin tocar las que ya editaste. **Rehacer…** abre el asistente con lo de la última vez.
 
 El primer montaje sustituye la línea de tiempo vacía del proyecto nuevo; los siguientes entran al lado. El proyecto guarda en `montaje.json` qué trabajo, material, receta pedida y elegida, marca y formatos lo hicieron.
 

@@ -624,7 +624,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
 
     let editor = app.global::<Editor>();
 
-    // ── Komunta's montage: the sheet, New project's section, Settings ──
+    // ── Komunta's montage: the wizard and its Settings page ──
     app.on_montaje_open(on_window!(|state| {
         state.handle(Msg::Montaje(MontajeMsg::Open));
     }));
@@ -2199,6 +2199,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                             },
                         ),
                         "export" => state.handle(Msg::Export(ExportMsg::Open)),
+                        "montage" => state.handle(Msg::Montaje(MontajeMsg::Open)),
                         "template" => state.save_template(),
                         "speech" => state.handle(Msg::Speech(SpeechMsg::Open)),
                         "clear-cache" => state.clear_project_cache(),

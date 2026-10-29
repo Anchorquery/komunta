@@ -97,7 +97,7 @@ export global GuionPanel {
     in property <string> message;
     /// Why the last montage did not happen.
     in property <string> error;
-    /// "Montar con IA": the sheet, for a first montage.
+    /// "Armar montaje": the wizard.
     callback montage();
     /// "Rehacer…": the sheet, as the last montage was asked.
     callback redo();
@@ -463,7 +463,7 @@ export component GuionPane inherits Pane {
         HorizontalLayout {
             alignment: center;
             Button {
-                label: I18n.t("montaje.montage");
+                label: I18n.t("montaje.build");
                 glyph: Glyph.sparkle;
                 primary: true;
                 clicked => { GuionPanel.montage(); }
