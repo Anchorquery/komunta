@@ -21,6 +21,7 @@ pub mod guion;
 pub mod media_bin;
 pub mod monitor;
 pub mod montaje;
+pub mod montaje_ajustes;
 pub mod pace;
 pub mod project;
 pub mod relink;

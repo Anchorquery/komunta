@@ -17,6 +17,17 @@ serde_yaml = "0.9"
 ttf-parser = "0.25"
 # Hand-drawn marks rasterised to PNG.
 tiny-skia = { version = "0.12", features = ["png-format"] }
+# Proving an AI provider's key: one GET for its list of models. Blocking,
+# like concat-speech's downloads: it runs on a thread of its own.
+ureq = "2"
+
+# The providers' keys live in the system's credential store.
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+keyring = { version = "3", features = ["linux-native"] }
 
 [[bin]]
 name = "montaje"

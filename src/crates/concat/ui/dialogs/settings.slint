@@ -59,8 +59,31 @@ export struct ShortcutData {
     custom: bool,
 }
 
+/// One AI provider on Settings › Montaje e IA: its key, never shown -
+/// kept in the system's credential store - and its model.
+export struct ProveedorIaData {
+    /// The engine's name: "anthropic", "openai", "google".
+    id: string,
+    name: string,
+    /// Komunta keeps a key for it.
+    kept: bool,
+    /// The engine's own `.env` has one, which can be brought over.
+    in-engine-env: bool,
+    /// It has a key from anywhere.
+    has-key: bool,
+    /// The key being typed, not yet kept.
+    draft: string,
+    /// 0 idle, 1 being proved, 2 proved good, 3 failed
+    state: int,
+    status: string,
+    model: int,
+    models: [string],
+    /// What the chosen model is good for.
+    note: string,
+}
+
 /// Komunta's Settings › Montaje e IA: where the montage engine is, the
-/// Python it runs on, and the AI that plans. Its own struct, published by
+/// Python it runs on, and which AI does what. Its own struct, published by
 /// `panes::montaje`, so the sheet's own data stays Concat's.
 export struct MontajeSettingsData {
     /// The engine's folder, as Settings has it or where it usually is.
@@ -73,6 +96,23 @@ export struct MontajeSettingsData {
     python-note: string,
     brain: int,
     brains: [string],
+    /// Who takes over when the planner fails: "none" first.
+    fallback-1: int,
+    fallback-2: int,
+    fallbacks: [string],
+    /// Claude's effort.
+    effort: int,
+    efforts: [string],
+    /// Who describes the clips.
+    describer: int,
+    describers: [string],
+    providers: [ProveedorIaData],
+    /// The whisper models for each language.
+    whisper-es: int,
+    whisper-eu: int,
+    whispers: [string],
+    /// A chosen whisper is not downloaded yet.
+    whisper-missing: bool,
     /// Where the team's own recipes live.
     recipes: string,
 }
@@ -1716,6 +1756,218 @@ export component SettingsDialog inherits Modal {
                         options: root.montaje.brains;
                         current: root.montaje.brain;
                         changed(index) => { root.montaje-choice("brain", index); }
+                    }
+
+                    Text {
+                        text: I18n.t("montaje.fallback");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Select {
+                            options: root.montaje.fallbacks;
+                            current: root.montaje.fallback-1;
+                            changed(index) => { root.montaje-choice("fallback-1", index); }
+                        }
+
+                        Select {
+                            options: root.montaje.fallbacks;
+                            current: root.montaje.fallback-2;
+                            changed(index) => { root.montaje-choice("fallback-2", index); }
+                        }
+                    }
+                }
+
+                // The providers the engine calls with a key: the key goes
+                // to the system's credential store and is proved with a
+                // call that lists the provider's models.
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("montaje.providers");
+                    hint: I18n.t("montaje.providersHint");
+
+                    for provider in root.montaje.providers: VerticalLayout {
+                        spacing: 6px;
+                        padding-bottom: 10px;
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 8px;
+                                    height: 8px;
+                                    border-radius: self.width / 2;
+                                    background: provider.state == 2 ? Theme.green
+                                        : provider.state == 3 ? Theme.danger
+                                        : provider.has-key ? Theme.fg-muted : Theme.fg-dim;
+                                }
+                            }
+
+                            Text {
+                                text: provider.name;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                horizontal-stretch: 1;
+                                text: provider.status;
+                                color: provider.state == 3 ? Theme.danger : Theme.fg-muted;
+                                font-size: Theme.fs-sm;
+                                vertical-alignment: center;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            Field {
+                                value: provider.draft;
+                                placeholder: provider.kept ? I18n.t("montaje.keyReplace") : I18n.t("montaje.keyPaste");
+                                technical: true;
+                                secret: true;
+                                edited(text) => { root.montaje-edited("key:" + provider.id, text); }
+                            }
+
+                            Button {
+                                horizontal-stretch: 0;
+                                label: I18n.t("montaje.keySave");
+                                glyph: Glyph.lock;
+                                primary: provider.draft != "";
+                                enabled: provider.draft != "";
+                                clicked => { root.montaje-action("save-key:" + provider.id); }
+                            }
+
+                            if provider.in-engine-env: Button {
+                                horizontal-stretch: 0;
+                                label: I18n.t("montaje.keyImport");
+                                clicked => { root.montaje-action("import-key:" + provider.id); }
+                            }
+
+                            Button {
+                                horizontal-stretch: 0;
+                                label: I18n.t("montaje.keyTest");
+                                enabled: provider.has-key && provider.state != 1;
+                                clicked => { root.montaje-action("test:" + provider.id); }
+                            }
+
+                            if provider.kept: Button {
+                                horizontal-stretch: 0;
+                                label: I18n.t("montaje.keyForget");
+                                ghost: true;
+                                clicked => { root.montaje-action("forget-key:" + provider.id); }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            Select {
+                                options: provider.models;
+                                current: provider.model;
+                                changed(index) => { root.montaje-choice("model:" + provider.id, index); }
+                            }
+
+                            Text {
+                                horizontal-stretch: 1;
+                                text: provider.note;
+                                color: Theme.fg-dim;
+                                font-size: Theme.fs-sm;
+                                vertical-alignment: center;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: I18n.t("montaje.effort");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                    }
+
+                    Select {
+                        options: root.montaje.efforts;
+                        current: root.montaje.effort;
+                        changed(index) => { root.montaje-choice("effort", index); }
+                    }
+                }
+
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("montaje.describer");
+                    hint: I18n.t("montaje.describerHint");
+
+                    Select {
+                        options: root.montaje.describers;
+                        current: root.montaje.describer;
+                        changed(index) => { root.montaje-choice("describer", index); }
+                    }
+                }
+
+                // The whisper that hears each language: the Basque one is
+                // a fine-tune, much better on Basque than the general one.
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("montaje.whisper");
+                    hint: I18n.t("montaje.whisperHint");
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            min-width: 80px;
+                            text: I18n.t("montaje.whisperEs");
+                            color: Theme.fg-muted;
+                            vertical-alignment: center;
+                        }
+
+                        Select {
+                            options: root.montaje.whispers;
+                            current: root.montaje.whisper-es;
+                            changed(index) => { root.montaje-choice("whisper-es", index); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            min-width: 80px;
+                            text: I18n.t("montaje.whisperEu");
+                            color: Theme.fg-muted;
+                            vertical-alignment: center;
+                        }
+
+                        Select {
+                            options: root.montaje.whispers;
+                            current: root.montaje.whisper-eu;
+                            changed(index) => { root.montaje-choice("whisper-eu", index); }
+                        }
+                    }
+
+                    if root.montaje.whisper-missing: HorizontalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            horizontal-stretch: 1;
+                            text: I18n.t("montaje.whisperMissing");
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+
+                        Button {
+                            horizontal-stretch: 0;
+                            label: I18n.t("montaje.openTranscriber");
+                            clicked => { root.montaje-action("open-transcriber"); }
+                        }
                     }
                 }
 

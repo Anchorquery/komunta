@@ -995,7 +995,7 @@ pub fn new_token() -> String {
 /// The catalogue key for a model's line: `area` and the model's id in
 /// lowerCamelCase, the shape every key has - `large-v3-q5_0` is
 /// `largeV3Q50`, `tiny.en` is `tinyEn`.
-fn model_key(area: &str, id: &str) -> String {
+pub(crate) fn model_key(area: &str, id: &str) -> String {
     let mut name = String::new();
     for (index, word) in id
         .split(|c: char| !c.is_ascii_alphanumeric())

@@ -125,7 +125,7 @@ pub struct Preferences {
     pub montaje: MontajePrefs,
 }
 
-/// Where Komunta's montage engine is and which AI plans with it.
+/// Where Komunta's montage engine is and which AI does what with it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct MontajePrefs {
@@ -134,8 +134,10 @@ pub struct MontajePrefs {
     pub motor: Option<String>,
     /// The Python to run it with. None is the engine's own `.venv`.
     pub python: Option<String>,
-    /// The AI, by the engine's `--ia` name. None is the engine's choice.
-    pub cerebro: Option<String>,
+    /// Who plans, describes and hears, and with which models; the keys
+    /// are in the system's credential store, not here.
+    #[serde(flatten)]
+    pub ia: montaje::Ia,
 }
 
 /// The voiceover panel's choices, kept from one take to the next and one

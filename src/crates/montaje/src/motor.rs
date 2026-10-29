@@ -83,6 +83,9 @@ pub struct Pedido {
     pub cerebro: Option<String>,
     /// For an automatic recipe, the ones the AI chooses among.
     pub candidatas: Vec<Receta>,
+    /// Added to the engine's environment: the providers' keys and the
+    /// run's own settings ([`crate::ia::VARIABLE_AJUSTES`]).
+    pub entorno: Vec<(String, String)>,
 }
 
 impl Pedido {
@@ -258,6 +261,7 @@ pub fn analizar(
         .arg("--reglas")
         .arg(&reglas)
         .env("PYTHONIOENCODING", "utf-8")
+        .envs(pedido.entorno.iter().map(|(variable, valor)| (variable, valor)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

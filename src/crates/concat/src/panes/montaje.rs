@@ -17,29 +17,19 @@
 use std::path::{Path, PathBuf};
 
 use concat_project::Project;
+use montaje::llavero::LlaveroSistema;
 use montaje::motor::{self, Avance, FalloMotor, Parada};
+use montaje::proveedores::Proveedor;
 use montaje::receta::{self, ModoSubtitulos, Receta};
 use montaje::{Encargo, Motor, Pedido};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
+use crate::panes::montaje_ajustes::{AjustesIa, nombre_cerebro};
 use crate::platform;
 use crate::studio::{Studio, home_folder};
 use crate::ui::{App, GuionPanel, MontajeData, MontajeSettingsData, PaneKind};
-
-/// The AIs the engine can plan with, as its `--ia` names them; the first,
-/// empty, is whichever the engine's own settings choose.
-pub const CEREBROS: [&str; 8] = [
-    "",
-    "claude_code",
-    "anthropic",
-    "google",
-    "openai",
-    "codex",
-    "gemini_cli",
-    "manual",
-];
 
 /// The Settings page the engine's folder is set on.
 pub const SETTINGS_PAGE: i32 = 8;
@@ -76,6 +66,8 @@ pub enum MontajeMsg {
     SettingChoice(String, i32),
     /// The Settings page: a button.
     SettingAction(String),
+    /// A provider's key proved: its models, or why it failed.
+    Tested(Proveedor, Result<Vec<String>, String>),
 }
 
 /// The montage's state: what is asked, and the run under way.
@@ -113,6 +105,8 @@ pub struct MontajePane {
     message: String,
     error: String,
     parada: Parada,
+    /// Settings' AI half, between publishes.
+    ajustes: AjustesIa,
 }
 
 impl Default for MontajePane {
@@ -141,6 +135,7 @@ impl Default for MontajePane {
             message: String::new(),
             error: String::new(),
             parada: Parada::default(),
+            ajustes: AjustesIa::default(),
         }
     }
 }
@@ -241,34 +236,30 @@ impl MontajePane {
             }
             MontajeMsg::Done(result) => self.done(result, studio),
             MontajeMsg::SettingEdited(field, value) => {
-                let value = Some(value).filter(|v| !v.trim().is_empty());
+                let kept = Some(value.clone()).filter(|v| !v.trim().is_empty());
                 match field.as_str() {
-                    "engine" => studio.prefs.montaje.motor = value,
-                    "python" => studio.prefs.montaje.python = value,
-                    _ => return,
+                    "engine" => studio.prefs.montaje.motor = kept,
+                    "python" => studio.prefs.montaje.python = kept,
+                    _ => return self.ajustes.editado(&field, value),
                 }
                 studio.prefs.save(&studio.host.dirs);
             }
-            MontajeMsg::SettingChoice(field, value) => {
-                if field == "brain" {
-                    let cerebro = CEREBROS.get(value.max(0) as usize).copied().unwrap_or("");
-                    studio.prefs.montaje.cerebro =
-                        Some(cerebro.to_owned()).filter(|c| !c.is_empty());
-                    studio.prefs.save(&studio.host.dirs);
-                }
-            }
-            MontajeMsg::SettingAction(name) => {
-                if name == "browse-engine" {
+            MontajeMsg::SettingChoice(field, value) => self.ajustes.elegido(&field, value, studio),
+            MontajeMsg::SettingAction(name) => match name.as_str() {
+                "browse-engine" => {
                     let current = motor(studio).carpeta.to_string_lossy().into_owned();
                     pick("engine", t("montaje.whereIsEngine"), current);
-                } else if name == "recipes" {
+                }
+                "recipes" => {
                     let folder = recipes_folder(studio);
                     let _ = std::fs::create_dir_all(&folder);
                     if let Err(error) = platform::reveal(&folder.to_string_lossy()) {
                         studio.notify(&error, true);
                     }
                 }
-            }
+                _ => self.ajustes.accion(&name, studio),
+            },
+            MontajeMsg::Tested(proveedor, resultado) => self.ajustes.probado(proveedor, resultado),
         }
     }
 
@@ -512,8 +503,9 @@ impl MontajePane {
                 .checked_sub(1)
                 .and_then(|i| self.brands.get(i))
                 .cloned(),
-            cerebro: studio.prefs.montaje.cerebro.clone(),
+            cerebro: studio.prefs.montaje.ia.cerebro.clone(),
             candidatas,
+            entorno: studio.prefs.montaje.ia.entorno(&LlaveroSistema),
         };
         // A redo is the next version of the project's montage.
         let version = Encargo::leer(&proyecto).map_or(0, |e| e.version);
@@ -614,9 +606,10 @@ impl MontajePane {
         let brain = studio
             .prefs
             .montaje
+            .ia
             .cerebro
-            .clone()
-            .unwrap_or_else(|| t("montaje.brainEngine"));
+            .as_deref()
+            .map_or_else(|| t("montaje.brainEngine"), nombre_cerebro);
         let mut brands = vec![SharedString::from(t("montaje.noBrand"))];
         brands.extend(self.brands.iter().map(|b| SharedString::from(b.as_str())));
         MontajeData {
@@ -680,8 +673,7 @@ impl MontajePane {
         }
         let engine = motor(studio);
         let prefs = &studio.prefs.montaje;
-        let brain = prefs.cerebro.as_deref().unwrap_or("");
-        MontajeSettingsData {
+        let mut data = MontajeSettingsData {
             engine: engine.carpeta.to_string_lossy().as_ref().into(),
             engine_ok: engine.valido(),
             python: prefs.python.clone().unwrap_or_default().into(),
@@ -690,10 +682,11 @@ impl MontajePane {
                 &[&engine.interprete().to_string_lossy()],
             )
             .into(),
-            brain: CEREBROS.iter().position(|c| *c == brain).unwrap_or(0) as i32,
-            brains: strings(CEREBROS.iter().map(|c| if c.is_empty() { "—" } else { *c })),
             recipes: recipes_folder(studio).to_string_lossy().as_ref().into(),
-        }
+            ..MontajeSettingsData::default()
+        };
+        self.ajustes.publicar(studio, &mut data);
+        data
     }
 }
 

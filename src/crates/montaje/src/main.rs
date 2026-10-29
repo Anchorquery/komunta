@@ -174,6 +174,9 @@ fn nuevo(
         marca: opcion.get("marca").cloned(),
         cerebro: opcion.get("ia").cloned(),
         candidatas,
+        // The keys kept by the app's Settings, so a run from here plans
+        // with the same accounts.
+        entorno: montaje::Ia::default().entorno(&montaje::llavero::LlaveroSistema),
     };
     let trabajo = montaje::motor::analizar(&motor, &pedido, &Default::default(), |a| {
         eprintln!("[{} {:>3.0}%] {}", a.fase, a.fraccion * 100.0, a.mensaje);
