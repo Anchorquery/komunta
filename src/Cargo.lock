@@ -195,6 +195,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "analisis"
+version = "0.2.8"
+dependencies = [
+ "concat-media",
+ "concat-speech",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "whisper-rs",
+]
+
+[[package]]
 name = "android-activity"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

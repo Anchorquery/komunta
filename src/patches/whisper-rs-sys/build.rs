@@ -224,6 +224,15 @@ fn main() {
         println!("cargo:rustc-link-lib=advapi32");
     }
 
+    // Komunta: the cmake crate writes CMAKE_<LANG>_FLAGS_RELEASE itself,
+    // and without the /O2 CMake would have put there. With the Visual
+    // Studio generator that left ggml's Release projects with no
+    // optimisation at all: an 8-second clip took whisper minutes. Asked
+    // for outright; a duplicate /O2 under Ninja and clang-cl is harmless.
+    if target.contains("msvc") {
+        config.cflag("-O2").cxxflag("-O2");
+    }
+
     if cfg!(feature = "coreml") {
         config.define("WHISPER_COREML", "ON");
         config.define("WHISPER_COREML_ALLOW_FALLBACK", "1");

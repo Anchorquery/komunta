@@ -268,10 +268,43 @@ pub fn cpu_backend() -> Result<String, String> {
         .clone()
 }
 
-fn model_file(dirs: &AppDirs, id: &str) -> Result<PathBuf, String> {
+/// Where model `id` lives once downloaded: `<models folder>/ggml-<id>.bin`.
+pub fn model_file(dirs: &AppDirs, id: &str) -> Result<PathBuf, String> {
     // Ids come from our own table; anything else is a bug, not input.
     known(id).ok_or_else(|| format!("unknown model {id:?}"))?;
     Ok(models_dir(dirs)?.join(format!("ggml-{id}.bin")))
+}
+
+/// Silero's voice detector, as whisper.cpp runs it: where speech is in a
+/// clip, and what whisper skips as silence. Version 5, the one the montage
+/// engine was tuned on. Under a megabyte, so it is fetched when first
+/// needed rather than offered in the panel.
+const VOICE_DETECTOR: &str = "silero-v5.1.2";
+const VOICE_DETECTOR_BYTES: u64 = 885_098;
+const VOICE_DETECTOR_SHA256: &str = "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf";
+const VOICE_DETECTOR_UPSTREAM: &str = "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin";
+
+/// The voice detector's file, downloaded first if it is not there yet.
+/// Blocks for the download: run it on its own thread.
+pub fn voice_detector(dirs: &AppDirs, cancel: &AtomicBool) -> Result<PathBuf, String> {
+    let destination = models_dir(dirs)?.join(model_archive(VOICE_DETECTOR));
+    if destination.is_file() {
+        return Ok(destination);
+    }
+    let partial = destination.with_extension("bin.part");
+    crate::fetch_model(
+        &model_archive(VOICE_DETECTOR),
+        VOICE_DETECTOR_UPSTREAM,
+        &partial,
+        VOICE_DETECTOR,
+        VOICE_DETECTOR_BYTES,
+        VOICE_DETECTOR_SHA256,
+        cancel,
+        &mut |_| {},
+    )?;
+    std::fs::rename(&partial, &destination)
+        .map_err(|error| format!("could not finish {}: {error}", destination.display()))?;
+    Ok(destination)
 }
 
 /// One model, as the settings panel shows it.

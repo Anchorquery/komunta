@@ -1,0 +1,29 @@
+[package]
+name = "analisis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Komunta: what a shoot's clips hold - speech, words, noise - for the montage. The port of the Python engine's motor/analisis.py."
+
+[features]
+# The listening half - whisper.cpp and ffmpeg - which the app turns on. Off,
+# the deciding half builds and tests in seconds, with no C toolchain.
+escucha = ["dep:concat-media", "dep:concat-speech", "dep:log", "dep:thiserror", "dep:whisper-rs"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+
+concat-media = { workspace = true, optional = true }
+concat-speech = { workspace = true, optional = true }
+log = { version = "0.4", optional = true }
+thiserror = { workspace = true, optional = true }
+whisper-rs = { version = "0.16", features = ["raw-api"], optional = true }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "escuchar"
+required-features = ["escucha"]
