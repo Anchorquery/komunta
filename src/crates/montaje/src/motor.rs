@@ -81,12 +81,38 @@ pub struct Pedido {
     /// The engine's AI ("claude_code", "anthropic", ...); None is its
     /// configured one.
     pub cerebro: Option<String>,
+    /// For an automatic recipe, the ones the AI chooses among.
+    pub candidatas: Vec<Receta>,
 }
 
 impl Pedido {
+    /// The recipe to lay the job's plan out with: the one asked for, or,
+    /// for an automatic request, the one the AI wrote in the plan (the
+    /// first candidate when it named none), in the frames asked for.
+    pub fn receta_final(&self, trabajo: &Path) -> Receta {
+        if !self.receta.es_automatica() {
+            return self.receta.clone();
+        }
+        let plantilla = crate::PlanCrudo::leer(trabajo)
+            .and_then(|plan| plan.plan())
+            .map(|plan| plan.plantilla)
+            .unwrap_or_default();
+        let mut receta = crate::receta::elegida(&self.candidatas, &plantilla)
+            .or_else(|| self.candidatas.iter().find(|r| !r.es_automatica()))
+            .cloned()
+            .unwrap_or_default();
+        receta.formato = self.receta.formato.clone();
+        receta.formatos_extra = self.receta.formatos_extra.clone();
+        receta
+    }
+
     /// The rules the AI gets: the recipe's, then the request.
     pub fn reglas(&self) -> String {
-        let mut reglas = self.receta.reglas();
+        let mut reglas = if self.receta.es_automatica() {
+            crate::receta::reglas_eleccion(&self.candidatas)
+        } else {
+            self.receta.reglas()
+        };
         if !self.peticion.trim().is_empty() {
             reglas.push_str("\n\n## Lo que pide el equipo para este vídeo\n");
             reglas.push_str(self.peticion.trim());

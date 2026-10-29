@@ -39,6 +39,13 @@ pub struct Encargo {
     /// How many times the plan has been laid out; the next timelines carry
     /// the number after it.
     pub version: u32,
+    /// The material folder the job was read from, to ask again with.
+    pub material: PathBuf,
+    /// The recipe asked for, by id: "automatica" when the AI chose
+    /// `receta`.
+    pub pedida: String,
+    /// "¿Qué quieres?", as it was asked.
+    pub peticion: String,
 }
 
 impl Encargo {
@@ -133,6 +140,11 @@ impl Encargo {
     pub fn injertar(&mut self, documento: &Value, nuevo: Project) -> Result<Value, Error> {
         let mut destino = from_document(documento).ok_or(Error::Proyecto)?;
         let nombre = documento["name"].as_str().unwrap_or("Montaje").to_owned();
+        // A project's first montage takes the place of the empty timeline
+        // it was made with.
+        if self.version == 0 && !nuevo.timelines.is_empty() {
+            destino.timelines.retain(|tl| !tl.clips.is_empty());
+        }
         self.version += 1;
         anadir(&mut destino, nuevo, self.version);
         let video = &destino.active().video;
@@ -313,5 +325,34 @@ mod tests {
                 assert!(c.media_id.is_empty() || destino.media.iter().any(|m| m.id == c.media_id));
             }
         }
+    }
+
+    #[test]
+    fn a_first_montage_takes_the_place_of_the_empty_timeline() {
+        let mut destino = proyecto();
+        let mut vacia = (*destino.timelines[0]).clone();
+        vacia.id = "tl900".to_owned();
+        vacia.name = "Timeline 1".to_owned();
+        vacia.clips.clear();
+        destino.timelines.push(std::sync::Arc::new(vacia));
+        let video = &destino.active().video;
+        let ajustes = DocumentSettings {
+            name: "Fiesta".to_owned(),
+            width: video.width,
+            height: video.height,
+            rate_num: video.rate_num,
+            rate_den: video.rate_den,
+        };
+        let documento = to_document(&ajustes, &destino);
+        let mut encargo = Encargo::default();
+        let primero = encargo.injertar(&documento, proyecto()).unwrap();
+        assert_eq!(encargo.version, 1);
+        let primero = from_document(&primero).unwrap();
+        assert!(primero.timelines.iter().all(|tl| !tl.clips.is_empty()));
+        assert!(!primero.timelines.iter().any(|tl| tl.name == "Timeline 1"));
+        // A second one keeps what is there, empty or not.
+        let segundo = encargo.injertar(&documento, proyecto()).unwrap();
+        let segundo = from_document(&segundo).unwrap();
+        assert!(segundo.timelines.iter().any(|tl| tl.name == "Timeline 1"));
     }
 }

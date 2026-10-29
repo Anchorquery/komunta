@@ -106,6 +106,20 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
             return None;
         }
         // A whole laid-out project is no line for the log.
+        Msg::Montaje(MontajeMsg::Done(result)) => {
+            return Some(Activity::once(
+                Info,
+                match result {
+                    Ok((encargo, project)) => format!(
+                        "montaje: {}, {} timelines",
+                        encargo.receta.id,
+                        project.timelines.len()
+                    ),
+                    Err(error) if error.is_empty() => "montaje: cancelled".to_owned(),
+                    Err(error) => format!("montaje: failed, {error}"),
+                },
+            ));
+        }
         Msg::Guion(GuionMsg::Prepared(result)) => {
             return Some(Activity::once(
                 Info,

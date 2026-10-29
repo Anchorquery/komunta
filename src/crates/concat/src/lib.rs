@@ -624,7 +624,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
 
     let editor = app.global::<Editor>();
 
-    // ── Komunta's montage sheet and its Settings page ──
+    // ── Komunta's montage: the sheet, New project's section, Settings ──
     app.on_montaje_open(on_window!(|state| {
         state.handle(Msg::Montaje(MontajeMsg::Open));
     }));
@@ -663,7 +663,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         state.handle(Msg::Montaje(MontajeMsg::SettingAction(name.to_string())));
     }));
 
-    // ── Komunta's script pane ──
+    // ── Komunta's Montaje pane ──
     let guion = app.global::<GuionPanel>();
     guion.on_resized(on_window!(|state, columns: i32| {
         state.handle(Msg::Guion(GuionMsg::Resized(columns)));
@@ -691,6 +691,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     guion.on_apply(on_window!(|state| {
         state.handle(Msg::Guion(GuionMsg::Apply));
+    }));
+    guion.on_montage(on_window!(|state| {
+        state.handle(Msg::Montaje(MontajeMsg::Open));
+    }));
+    guion.on_redo(on_window!(|state| {
+        state.handle(Msg::Montaje(MontajeMsg::Redo));
+    }));
+    guion.on_cancel(on_window!(|state| {
+        state.handle(Msg::Montaje(MontajeMsg::Action("cancel".to_owned())));
+    }));
+    guion.on_dismiss(on_window!(|state| {
+        state.handle(Msg::Montaje(MontajeMsg::Action("dismiss".to_owned())));
     }));
 
     // ── the launch screen ──

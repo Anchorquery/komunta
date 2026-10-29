@@ -97,7 +97,60 @@ impl Default for Receta {
     }
 }
 
+/// The id of the recipe that is not one: the AI looks at the material and
+/// picks the kind of video itself.
+pub const AUTOMATICA: &str = "automatica";
+
+/// "Automático", first in the list: the AI chooses among the others.
+pub fn automatica() -> Receta {
+    Receta {
+        id: AUTOMATICA.to_owned(),
+        nombre: "Automático".to_owned(),
+        descripcion: "La IA mira el material y elige el tipo de vídeo.".to_owned(),
+        ..Receta::default()
+    }
+}
+
+/// The rules for an automatic request: every recipe, by id, with its
+/// rules, and the order to pick one and say which in "plantilla".
+pub fn reglas_eleccion(candidatas: &[Receta]) -> String {
+    let mut reglas = vec![
+        "## Tipo de vídeo: elígelo tú".to_owned(),
+        "Mira el material (qué se dice, cuántas personas hablan, si hay música o acto, si hay guion) y elige          UNA de estas recetas, la que mejor encaje. Escribe su id exacto en \"plantilla\" y sigue solo sus reglas."
+            .to_owned(),
+    ];
+    for receta in candidatas.iter().filter(|r| r.id != AUTOMATICA) {
+        reglas.push(format!(
+            "
+### id \"{}\": {} — {}
+{}",
+            receta.id,
+            receta.nombre,
+            receta.descripcion,
+            receta.reglas()
+        ));
+    }
+    reglas.join(
+        "
+",
+    )
+}
+
+/// The recipe the AI chose for an automatic request, by the id it wrote
+/// in the plan; None when it named none of them.
+pub fn elegida<'a>(candidatas: &'a [Receta], plantilla: &str) -> Option<&'a Receta> {
+    let plantilla = plantilla.trim();
+    candidatas
+        .iter()
+        .find(|r| r.id != AUTOMATICA && r.id == plantilla)
+}
+
 impl Receta {
+    /// Whether this is the AI-chooses one.
+    pub fn es_automatica(&self) -> bool {
+        self.id == AUTOMATICA
+    }
+
     /// The recipe's choices as rules for the AI, after its own
     /// instructions.
     pub fn reglas(&self) -> String {
@@ -404,5 +457,25 @@ mod tests {
             assert_eq!(serde_json::from_str::<Receta>(&texto).unwrap(), receta);
             assert!(receta.reglas().contains(&receta.nombre));
         }
+    }
+
+    #[test]
+    fn automatic_lists_every_recipe_and_reads_back_the_choice() {
+        let recetas: Vec<Receta> = std::iter::once(automatica()).chain(de_serie()).collect();
+        let reglas = reglas_eleccion(&recetas);
+        for receta in de_serie() {
+            assert!(
+                reglas.contains(&format!("id \"{}\"", receta.id)),
+                "{reglas}"
+            );
+        }
+        assert!(!reglas.contains(AUTOMATICA));
+        let primera = &de_serie()[0];
+        assert_eq!(
+            elegida(&recetas, &format!(" {} ", primera.id)),
+            Some(primera)
+        );
+        assert_eq!(elegida(&recetas, AUTOMATICA), None);
+        assert_eq!(elegida(&recetas, "otra"), None);
     }
 }

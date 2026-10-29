@@ -4,8 +4,10 @@
 //! Komunta's "Guion de montaje" pane: the plan of a montage project, as a
 //! script to edit, and "Aplicar al vídeo".
 //!
-//! A project made by "Nuevo montaje" carries `montaje.json`, which names
-//! the engine's job; the plan is read from there when the project opens.
+//! A project montaged with AI carries `montaje.json`, which names the
+//! engine's job; the plan is read from there when the project opens. A
+//! project without one shows the offer to montage it, and a run under way
+//! shows its progress (both [`crate::panes::montaje`]'s).
 //! Edits change the plan in memory ([`PlanCrudo`]) and the script is
 //! rebuilt from it, so what the pane shows is always what would be laid
 //! out. Applying writes the plan back to the job, as a new version, lays it
@@ -223,8 +225,7 @@ impl GuionPane {
         );
     }
 
-    /// The layout is ready: it joins the project as it stands now, which is
-    /// saved and opened again with the new timelines in front.
+    /// The layout is ready: it joins the project as it stands now.
     fn prepared(&mut self, result: Result<Project, String>, studio: &mut Studio) {
         self.busy = false;
         let nuevo = match result {
@@ -239,31 +240,9 @@ impl GuionPane {
         else {
             return;
         };
-        studio.flush_commit();
-        studio.pause();
-        let Some(session) = studio.session.as_mut() else {
-            return;
-        };
-        let (path, documento) = session.prepare_save(None);
-        let written = encargo
-            .injertar(&documento, nuevo)
-            .map_err(|error| error.to_string())
-            .and_then(|documento| {
-                projects::save_ordered(&path, &documento, projects::ticket())?;
-                encargo
-                    .guardar(&proyecto)
-                    .map_err(|error| error.to_string())
-            });
-        if let Err(error) = written {
+        if let Err(error) = graft(studio, &mut encargo, nuevo) {
             self.status = error;
             studio.notify(&t("guion.applyFailed"), true);
-            return;
-        }
-        // What was on disk is the project with the new timelines; the
-        // session is let go without saving over it, and opened again.
-        studio.release_project();
-        if let Err(error) = projects::open(&path).and_then(|info| studio.open_project(info)) {
-            studio.notify(&error, true);
             return;
         }
         // Opening loaded the script into the studio's pane, which this one
@@ -366,6 +345,36 @@ impl GuionPane {
             .collect();
         panel.set_blocks(model(blocks));
     }
+}
+
+/// Adds a laid-out montage to the open project as new timelines: the
+/// project is saved as it stands with them, the link to the job written
+/// beside it, and the project opened again with the first of them in
+/// front.
+pub(crate) fn graft(
+    studio: &mut Studio,
+    encargo: &mut Encargo,
+    nuevo: Project,
+) -> Result<(), String> {
+    studio.flush_commit();
+    studio.pause();
+    let session = studio
+        .session
+        .as_mut()
+        .ok_or_else(|| t("montaje.noProject"))?;
+    let proyecto = PathBuf::from(session.path());
+    let (path, documento) = session.prepare_save(None);
+    let documento = encargo
+        .injertar(&documento, nuevo)
+        .map_err(|error| error.to_string())?;
+    projects::save_ordered(&path, &documento, projects::ticket())?;
+    encargo
+        .guardar(&proyecto)
+        .map_err(|error| error.to_string())?;
+    // What is on disk is the project with the new timelines; the session
+    // is let go without saving over it, and opened again.
+    studio.release_project();
+    projects::open(&path).and_then(|info| studio.open_project(info))
 }
 
 fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {

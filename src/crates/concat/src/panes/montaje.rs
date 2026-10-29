@@ -1,28 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Komunikia
 
-//! Komunta's "Nuevo montaje" sheet, and the Settings page that says where
-//! the montage engine is.
+//! Komunta's montage with AI, which is something a project has rather than
+//! a project of its own: the "Montar con IA" part of New project, the
+//! "Montar con IA" / "Rehacer" sheet over an open project, and the
+//! Settings page that says where the engine is.
 //!
-//! Three steps - the material, what the video is for, the captions and
-//! the script - then the engine runs on a worker: the Python engine reads,
-//! transcribes and asks the AI for the plan ([`montaje::motor`]), and the
-//! `montaje` crate lays the plan out as a project, which opens. Its
-//! progress comes back as [`MontajeMsg::Progress`], one line at a time.
+//! The sheet's three steps - the material, what the video is for, the
+//! captions and the script - fill the same state New project's section
+//! does. Running it works on the open project: the Python engine reads,
+//! transcribes and asks the AI for the plan ([`montaje::motor`]) on a
+//! worker, the `montaje` crate lays the plan out, and the result joins the
+//! project as new timelines ([`crate::panes::guion::graft`]). Its progress
+//! comes back as [`MontajeMsg::Progress`] and shows in the Montaje pane.
 
 use std::path::{Path, PathBuf};
 
-use concat_host::projects;
+use concat_project::Project;
 use montaje::motor::{self, Avance, FalloMotor, Parada};
 use montaje::receta::{self, ModoSubtitulos, Receta};
 use montaje::{Encargo, Motor, Pedido};
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
 use crate::platform;
 use crate::studio::{Studio, home_folder};
-use crate::ui::{MontajeData, MontajeSettingsData};
+use crate::ui::{App, GuionPanel, MontajeData, MontajeSettingsData, PaneKind};
 
 /// The AIs the engine can plan with, as its `--ia` names them; the first,
 /// empty, is whichever the engine's own settings choose.
@@ -40,10 +44,13 @@ pub const CEREBROS: [&str; 8] = [
 /// The Settings page the engine's folder is set on.
 pub const SETTINGS_PAGE: i32 = 8;
 
-/// Everything that can happen to the sheet and its Settings page.
+/// Everything that can happen to the montage.
 #[derive(Debug)]
 pub enum MontajeMsg {
+    /// The sheet, over the open project, for a first montage.
     Open,
+    /// The sheet, filled in from the open project's last montage.
+    Redo,
     Close,
     /// A text field, by name, and what it holds now.
     TextEdited(String, String),
@@ -53,13 +60,15 @@ pub enum MontajeMsg {
     Action(String),
     /// A picker answered: which field, and the path.
     Chosen(String, PathBuf),
+    /// Montage the open project as the sheet, or New project, has it.
+    Run,
     /// The engine reported a step.
     Progress(Avance),
-    /// The plan is in; the project is being laid out.
+    /// The plan is in; it is being laid out.
     Laying,
-    /// The run ended: the project folder, or why not. An empty error is a
-    /// run that was cancelled.
-    Done(Result<PathBuf, String>),
+    /// The run ended: the montage laid out, or why not. An empty error is
+    /// a run that was cancelled.
+    Done(Result<(Encargo, Project), String>),
     /// The Settings page: a field changed.
     SettingEdited(String, String),
     /// The Settings page: the AI changed.
@@ -68,13 +77,20 @@ pub enum MontajeMsg {
     SettingAction(String),
 }
 
-/// The sheet's state.
+/// The montage's state: what is asked, and the run under way.
 pub struct MontajePane {
+    /// The sheet is up.
     pub open: bool,
+    /// The sheet is redoing the project's montage rather than making one.
+    redo: bool,
     step: i32,
-    name: String,
+    /// New project's "Montar con IA" is on.
+    pub enabled: bool,
     material: String,
-    location: String,
+    /// What the material folder holds, worked out when it changes rather
+    /// than on every publish.
+    material_note: String,
+    /// "Automático" first, then the recipes it chooses among.
     recipes: Vec<Receta>,
     recipe: usize,
     request: String,
@@ -86,9 +102,13 @@ pub struct MontajePane {
     /// 0 for no brand, otherwise one past the index into `brands`.
     brand: usize,
     language: i32,
+    /// 0 as the kind of video has it, then script, voice, key phrases,
+    /// none.
     captions: i32,
     script: String,
     busy: bool,
+    /// The project folder the run under way is for.
+    running_in: Option<PathBuf>,
     phase: i32,
     progress: f32,
     message: String,
@@ -100,11 +120,12 @@ impl Default for MontajePane {
     fn default() -> Self {
         Self {
             open: false,
+            redo: false,
             step: 0,
-            name: String::new(),
+            enabled: false,
             material: String::new(),
-            location: String::new(),
-            recipes: receta::de_serie(),
+            material_note: String::new(),
+            recipes: with_automatic(receta::de_serie()),
             recipe: 0,
             request: String::new(),
             vertical: true,
@@ -116,6 +137,7 @@ impl Default for MontajePane {
             captions: 0,
             script: String::new(),
             busy: false,
+            running_in: None,
             phase: 0,
             progress: 0.0,
             message: String::new(),
@@ -123,6 +145,13 @@ impl Default for MontajePane {
             parada: Parada::default(),
         }
     }
+}
+
+/// "Automático" before the recipes, which it chooses among.
+fn with_automatic(recipes: Vec<Receta>) -> Vec<Receta> {
+    std::iter::once(receta::automatica())
+        .chain(recipes.into_iter().filter(|r| !r.es_automatica()))
+        .collect()
 }
 
 /// The engine as Settings has it, or where it usually is.
@@ -145,44 +174,42 @@ fn recipes_folder(studio: &Studio) -> PathBuf {
     studio.host.dirs.config.join("recetas")
 }
 
+/// The open project's folder.
+fn open_project(studio: &Studio) -> Option<PathBuf> {
+    studio
+        .session
+        .as_ref()
+        .map(|session| PathBuf::from(session.path()))
+}
+
 impl MontajePane {
     /// Applies one message.
     pub fn update(&mut self, msg: MontajeMsg, studio: &mut Studio) {
         match msg {
-            MontajeMsg::Open => {
-                self.open = true;
-                if !self.busy {
-                    self.step = 0;
-                    self.error.clear();
-                }
-                self.recipes = receta::cargar(&recipes_folder(studio));
-                self.recipe = self.recipe.min(self.recipes.len().saturating_sub(1));
-                self.brands = motor(studio).marcas();
-                self.brand = self.brand.min(self.brands.len());
-                if self.location.is_empty() {
-                    self.location = studio.start.location.clone();
-                }
-            }
-            // A run keeps going with the sheet down; it opens the project
-            // when it is done.
+            MontajeMsg::Open => self.open_sheet(false, studio),
+            MontajeMsg::Redo => self.open_sheet(true, studio),
             MontajeMsg::Close => self.open = false,
             MontajeMsg::TextEdited(field, value) => match field.as_str() {
-                "name" => self.name = value,
-                "material" => self.material = value,
-                "location" => self.location = value,
+                "material" => self.set_material(value),
                 "request" => self.request = value,
                 _ => {}
             },
             MontajeMsg::Choice(field, value) => {
                 let index = value.max(0) as usize;
                 match field.as_str() {
+                    "enabled" => {
+                        self.enabled = value != 0;
+                        if self.enabled {
+                            self.refresh(studio);
+                        }
+                    }
                     "recipe" => {
                         self.recipe = index.min(self.recipes.len().saturating_sub(1));
                         self.from_recipe();
                     }
                     "brand" => self.brand = index.min(self.brands.len()),
                     "language" => self.language = value.clamp(0, 2),
-                    "captions" => self.captions = value.clamp(0, 3),
+                    "captions" => self.captions = value.clamp(0, 4),
                     "vertical" => self.vertical = value != 0,
                     "wide" => self.wide = value != 0,
                     "square" => self.square = value != 0,
@@ -193,16 +220,7 @@ impl MontajePane {
             MontajeMsg::Chosen(field, path) => {
                 let path = path.to_string_lossy().into_owned();
                 match field.as_str() {
-                    "material" => {
-                        if self.name.trim().is_empty() {
-                            self.name = Path::new(&path)
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or_default();
-                        }
-                        self.material = path;
-                    }
-                    "location" => self.location = path,
+                    "material" => self.set_material(path),
                     "script" => self.script = path,
                     "engine" => {
                         studio.prefs.montaje.motor = Some(path);
@@ -212,6 +230,7 @@ impl MontajePane {
                     _ => {}
                 }
             }
+            MontajeMsg::Run => self.run(studio),
             MontajeMsg::Progress(avance) => {
                 self.phase = match avance.fase.as_str() {
                     "ingesta" => 0,
@@ -229,34 +248,7 @@ impl MontajePane {
                 self.progress = 0.0;
                 self.message = t("montaje.layingOut");
             }
-            MontajeMsg::Done(result) => {
-                self.busy = false;
-                match result {
-                    Ok(folder) => {
-                        self.open = false;
-                        self.step = 0;
-                        self.name.clear();
-                        self.request.clear();
-                        self.script.clear();
-                        let path = folder.to_string_lossy().into_owned();
-                        if let Err(error) =
-                            projects::open(&path).and_then(|info| studio.open_project(info))
-                        {
-                            studio.notify(&error, true);
-                        }
-                    }
-                    // Cancelled: back to the last step, as it was.
-                    Err(error) if error.is_empty() => self.step = 2,
-                    Err(error) => {
-                        self.error = error;
-                        // Said on the toast too, for a sheet put away
-                        // while it ran.
-                        if !self.open {
-                            studio.notify(&t("montaje.failed"), true);
-                        }
-                    }
-                }
-            }
+            MontajeMsg::Done(result) => self.done(result, studio),
             MontajeMsg::SettingEdited(field, value) => {
                 let value = Some(value).filter(|v| !v.trim().is_empty());
                 match field.as_str() {
@@ -289,23 +281,93 @@ impl MontajePane {
         }
     }
 
-    /// The recipe's own frames and captions, when it is picked.
+    /// The sheet over the open project; for a redo, as its last montage
+    /// was asked for.
+    fn open_sheet(&mut self, redo: bool, studio: &Studio) {
+        let Some(proyecto) = open_project(studio) else {
+            return;
+        };
+        if self.busy {
+            return;
+        }
+        self.open = true;
+        self.redo = redo;
+        self.step = 0;
+        self.error.clear();
+        self.refresh(studio);
+        if redo {
+            if let Some(encargo) = Encargo::leer(&proyecto) {
+                self.fill(&encargo);
+            }
+        }
+    }
+
+    /// The recipes and brand kits as they are on disk now.
+    fn refresh(&mut self, studio: &Studio) {
+        let id = self.recipes.get(self.recipe).map(|r| r.id.clone());
+        self.recipes = with_automatic(receta::cargar(&recipes_folder(studio)));
+        self.recipe = id
+            .and_then(|id| self.recipes.iter().position(|r| r.id == id))
+            .unwrap_or(0);
+        self.brands = motor(studio).marcas();
+        self.brand = self.brand.min(self.brands.len());
+    }
+
+    /// The sheet as the project's last montage was asked for.
+    fn fill(&mut self, encargo: &Encargo) {
+        if !encargo.material.as_os_str().is_empty() {
+            self.set_material(encargo.material.to_string_lossy().into_owned());
+        }
+        let pedida = if encargo.pedida.is_empty() {
+            &encargo.receta.id
+        } else {
+            &encargo.pedida
+        };
+        if let Some(index) = self.recipes.iter().position(|r| &r.id == pedida) {
+            self.recipe = index;
+        }
+        self.request = encargo.peticion.clone();
+        if !encargo.formatos.is_empty() {
+            let has = |frame: &str| encargo.formatos.iter().any(|f| f == frame);
+            self.vertical = has("vertical");
+            self.wide = has("16x9");
+            self.square = has("1x1");
+        }
+        self.brand = encargo
+            .marca
+            .as_ref()
+            .and_then(|marca| self.brands.iter().position(|b| b == marca))
+            .map_or(0, |i| i + 1);
+    }
+
+    fn set_material(&mut self, material: String) {
+        self.material_note = material_note(&material);
+        self.material = material;
+    }
+
+    /// The recipe's own frames, when it is picked; its captions are what
+    /// "as the kind has it" means.
     fn from_recipe(&mut self) {
         let Some(recipe) = self.recipes.get(self.recipe) else {
             return;
         };
+        self.captions = 0;
+        if recipe.es_automatica() {
+            return;
+        }
         let frames: Vec<&str> = std::iter::once(recipe.formato.as_str())
             .chain(recipe.formatos_extra.iter().map(String::as_str))
             .collect();
         self.vertical = frames.contains(&"vertical");
         self.wide = frames.contains(&"16x9");
         self.square = frames.contains(&"1x1");
-        self.captions = match recipe.subtitulos {
-            ModoSubtitulos::Documento => 0,
-            ModoSubtitulos::Voz => 1,
-            ModoSubtitulos::Claves => 2,
-            ModoSubtitulos::Ninguno => 3,
-        };
+    }
+
+    /// The one frame a new project's shape asks for.
+    pub fn frame_from(&mut self, width: u32, height: u32) {
+        self.vertical = height > width;
+        self.wide = width > height;
+        self.square = width == height;
     }
 
     fn action(&mut self, name: &str, studio: &mut Studio) {
@@ -314,11 +376,6 @@ impl MontajePane {
                 "material",
                 t("montaje.whereIsMaterial"),
                 self.material.clone(),
-            ),
-            "browse-location" => pick(
-                "location",
-                t("start.whereShouldProjectFolder"),
-                self.location.clone(),
             ),
             "browse-script" => {
                 crate::host::after_dialog(
@@ -337,6 +394,7 @@ impl MontajePane {
             "clear-script" => self.script.clear(),
             "settings" => {
                 self.open = false;
+                studio.handle(Msg::Start(crate::panes::start::StartMsg::Dismiss));
                 studio.handle(Msg::Settings(crate::panes::settings::SettingsMsg::Open));
                 studio.handle(Msg::Settings(
                     crate::panes::settings::SettingsMsg::PageChanged(SETTINGS_PAGE),
@@ -356,11 +414,12 @@ impl MontajePane {
                 }
                 self.step = (self.step + 1).min(2);
             }
-            "create" => self.create(studio),
+            "run" => self.run(studio),
             "cancel" => {
                 self.message = t("montaje.cancelling");
                 self.parada.cancelar();
             }
+            "dismiss" => self.error.clear(),
             _ => {}
         }
     }
@@ -377,31 +436,18 @@ impl MontajePane {
         Ok(())
     }
 
-    fn create(&mut self, studio: &mut Studio) {
-        self.error.clear();
-        if let Err(error) = self.check_material() {
-            self.error = error;
-            return;
+    /// Whether a montage could start: the material, and the engine.
+    pub fn ready(&self, studio: &Studio) -> Result<(), String> {
+        self.check_material()?;
+        if !motor(studio).valido() {
+            return Err(t("montaje.engineMissing"));
         }
-        let engine = motor(studio);
-        if !engine.valido() {
-            self.error = t("montaje.engineMissing");
-            return;
-        }
-        let name = self.name.trim().to_owned();
-        if name.is_empty() {
-            self.step = 0;
-            self.error = t("montaje.nameMissing");
-            return;
-        }
-        let folder = Path::new(self.location.trim()).join(projects::folder_name(&name));
-        if folder.exists() {
-            self.error = tf("montaje.folderExists", &[&folder.to_string_lossy()]);
-            return;
-        }
-        let Some(mut recipe) = self.recipes.get(self.recipe).cloned() else {
-            return;
-        };
+        Ok(())
+    }
+
+    /// The recipe asked for in the frames and captions asked for, the
+    /// recipes an automatic one chooses among likewise, and the frames.
+    fn asked(&self) -> (Receta, Vec<Receta>, Vec<String>) {
         let mut frames: Vec<String> = [
             (self.vertical, "vertical"),
             (self.wide, "16x9"),
@@ -415,21 +461,63 @@ impl MontajePane {
         if frames.is_empty() {
             frames.push("vertical".to_owned());
         }
-        let Some((main, extra)) = frames.split_first() else {
+        let modo = match self.captions {
+            1 => Some(ModoSubtitulos::Documento),
+            2 => Some(ModoSubtitulos::Voz),
+            3 => Some(ModoSubtitulos::Claves),
+            4 => Some(ModoSubtitulos::Ninguno),
+            _ => None,
+        };
+        let fit = |mut recipe: Receta| {
+            recipe.formato = frames[0].clone();
+            recipe.formatos_extra = frames[1..].to_vec();
+            if let Some(modo) = modo {
+                recipe.subtitulos = modo;
+            }
+            recipe
+        };
+        let recipe = fit(self
+            .recipes
+            .get(self.recipe)
+            .cloned()
+            .unwrap_or_else(receta::automatica));
+        let candidates = if recipe.es_automatica() {
+            self.recipes
+                .iter()
+                .filter(|r| !r.es_automatica())
+                .cloned()
+                .map(fit)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (recipe, candidates, frames)
+    }
+
+    /// Starts the montage of the open project. The sheet comes down; the
+    /// Montaje pane shows how it goes.
+    fn run(&mut self, studio: &mut Studio) {
+        if self.busy {
+            return;
+        }
+        let Some(proyecto) = open_project(studio) else {
             return;
         };
-        recipe.formato = main.clone();
-        recipe.formatos_extra = extra.to_vec();
-        recipe.subtitulos = match self.captions {
-            1 => ModoSubtitulos::Voz,
-            2 => ModoSubtitulos::Claves,
-            3 => ModoSubtitulos::Ninguno,
-            _ => ModoSubtitulos::Documento,
-        };
+        self.error.clear();
+        if let Err(error) = self.ready(studio) {
+            self.error = error;
+            return;
+        }
+        let engine = motor(studio);
+        let (recipe, candidatas, frames) = self.asked();
+        let name = proyecto
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "montaje".to_owned());
         let pedido = Pedido {
             material: PathBuf::from(self.material.trim()),
             id: motor::id_trabajo(&name, &motor::ahora()),
-            receta: recipe.clone(),
+            receta: recipe,
             peticion: self.request.clone(),
             guion: Some(PathBuf::from(self.script.trim())).filter(|p| !p.as_os_str().is_empty()),
             idioma: match self.language {
@@ -443,17 +531,25 @@ impl MontajePane {
                 .and_then(|i| self.brands.get(i))
                 .cloned(),
             cerebro: studio.prefs.montaje.cerebro.clone(),
+            candidatas,
         };
+        // A redo is the next version of the project's montage.
+        let version = Encargo::leer(&proyecto).map_or(0, |e| e.version);
         log::info!("montaje: {} from {}", pedido.id, pedido.material.display());
+        self.open = false;
+        self.enabled = false;
         self.busy = true;
-        self.step = 3;
+        self.running_in = Some(proyecto.clone());
         self.phase = 0;
         self.progress = 0.0;
         self.message = t("montaje.starting");
         self.parada = Parada::default();
+        if !studio.dock.contains(PaneKind::Guion) {
+            studio.dock.replace(PaneKind::Media, PaneKind::Guion);
+        }
         let parada = self.parada.clone();
         crate::host::spawn(
-            move || -> Result<PathBuf, String> {
+            move || -> Result<(Encargo, Project), String> {
                 let trabajo = motor::analizar(&engine, &pedido, &parada, |avance| {
                     crate::host::on_ui(move |studio, _, _| {
                         studio.handle(Msg::Montaje(MontajeMsg::Progress(avance)));
@@ -464,28 +560,66 @@ impl MontajePane {
                     error => error.to_string(),
                 })?;
                 crate::host::on_ui(|studio, _, _| studio.handle(Msg::Montaje(MontajeMsg::Laying)));
-                let mut encargo = Encargo {
+                let encargo = Encargo {
+                    receta: pedido.receta_final(&trabajo),
                     trabajo,
                     motor: engine.carpeta.clone(),
-                    receta: recipe,
                     marca: pedido.marca.clone(),
                     formatos: frames,
-                    version: 0,
+                    version,
+                    material: pedido.material.clone(),
+                    pedida: pedido.receta.id.clone(),
+                    peticion: pedido.peticion.clone(),
                 };
-                encargo
-                    .crear(&folder, &name)
+                let nuevo = encargo
+                    .preparar(&proyecto)
                     .map_err(|error| error.to_string())?;
-                Ok(folder)
+                Ok((encargo, nuevo))
             },
             |studio, _, _, result| studio.handle(Msg::Montaje(MontajeMsg::Done(result))),
         );
     }
 
-    /// The sheet as the window draws it.
+    /// The run ended: the montage joins the project it was made for.
+    fn done(&mut self, result: Result<(Encargo, Project), String>, studio: &mut Studio) {
+        self.busy = false;
+        let running_in = self.running_in.take();
+        let (mut encargo, nuevo) = match result {
+            Ok(done) => done,
+            // Cancelled: nothing to say.
+            Err(error) if error.is_empty() => {
+                self.message.clear();
+                return;
+            }
+            Err(error) => {
+                self.error = error;
+                studio.notify(&t("montaje.failed"), true);
+                return;
+            }
+        };
+        // The project the montage was for was closed while it ran: it is
+        // not put into another one. The job stays in the engine's folder.
+        if running_in.is_none() || open_project(studio) != running_in {
+            self.error = tf("montaje.projectClosed", &[&encargo.trabajo.display()]);
+            studio.notify(&t("montaje.failed"), true);
+            return;
+        }
+        match crate::panes::guion::graft(studio, &mut encargo, nuevo) {
+            Ok(()) => {
+                self.message.clear();
+                studio.notify(&tf("montaje.done", &[&encargo.receta.nombre]), false);
+            }
+            Err(error) => {
+                self.error = error;
+                studio.notify(&t("montaje.failed"), true);
+            }
+        }
+    }
+
+    /// The sheet and New project's section as the window draws them.
     pub fn data(&self, studio: &Studio) -> MontajeData {
-        // Closed, there is nothing to draw, and the folder is not walked
-        // on every publish.
-        if !self.open {
+        // Neither up: nothing to draw.
+        if !self.open && !studio.start.composing {
             return MontajeData::default();
         }
         let engine = motor(studio);
@@ -500,11 +634,16 @@ impl MontajePane {
         brands.extend(self.brands.iter().map(|b| SharedString::from(b.as_str())));
         MontajeData {
             open: self.open,
+            redo: self.redo,
+            enabled: self.enabled,
             step: self.step,
-            name: self.name.as_str().into(),
             material: self.material.as_str().into(),
-            material_note: material_note(&self.material).into(),
-            location: self.location.as_str().into(),
+            material_note: if self.material.trim().is_empty() {
+                t("montaje.materialHint")
+            } else {
+                self.material_note.clone()
+            }
+            .into(),
             recipe: self.recipe as i32,
             recipes: strings(self.recipes.iter().map(|r| r.nombre.as_str())),
             recipe_note: self
@@ -533,11 +672,19 @@ impl MontajePane {
             }
             .into(),
             busy: self.busy,
-            phase: self.phase,
-            progress: self.progress,
-            message: self.message.as_str().into(),
             error: self.error.as_str().into(),
         }
+    }
+
+    /// The run, as the Montaje pane shows it.
+    pub fn publish_run(&self, app: &App) {
+        let panel = app.global::<GuionPanel>();
+        panel.set_running(self.busy);
+        panel.set_phase(self.phase);
+        panel.set_progress(self.progress);
+        panel.set_message(self.message.as_str().into());
+        // A run's error belongs to the pane while the sheet is down.
+        panel.set_error(if self.open { "" } else { self.error.as_str() }.into());
     }
 
     /// The Settings page as the window draws it.
@@ -623,7 +770,7 @@ fn contar(folder: &Path) -> (usize, usize, usize, usize) {
 fn material_note(material: &str) -> String {
     let folder = Path::new(material.trim());
     if material.trim().is_empty() {
-        return t("montaje.materialHint");
+        return String::new();
     }
     if !folder.is_dir() {
         return t("montaje.materialMissing");

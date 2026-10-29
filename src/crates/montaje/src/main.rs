@@ -151,10 +151,16 @@ fn nuevo(
     let id_receta = opcion
         .get("receta")
         .map_or("mensaje_a_camara", String::as_str);
-    let receta = receta::cargar(&opcion.get("recetas").map(PathBuf::from).unwrap_or_default())
-        .into_iter()
-        .find(|r| r.id == id_receta)
-        .ok_or(format!("no hay receta «{id_receta}»"))?;
+    let candidatas = receta::cargar(&opcion.get("recetas").map(PathBuf::from).unwrap_or_default());
+    let receta = if id_receta == receta::AUTOMATICA {
+        receta::automatica()
+    } else {
+        candidatas
+            .iter()
+            .find(|r| r.id == id_receta)
+            .cloned()
+            .ok_or(format!("no hay receta «{id_receta}»"))?
+    };
     let nombre = proyecto
         .file_name()
         .map_or("montaje".into(), |n| n.to_string_lossy().into_owned());
@@ -167,11 +173,16 @@ fn nuevo(
         idioma: opcion.get("idioma").cloned(),
         marca: opcion.get("marca").cloned(),
         cerebro: opcion.get("ia").cloned(),
+        candidatas,
     };
     let trabajo = montaje::motor::analizar(&motor, &pedido, &Default::default(), |a| {
         eprintln!("[{} {:>3.0}%] {}", a.fase, a.fraccion * 100.0, a.mensaje);
     })
     .map_err(|e| e.to_string())?;
+    let receta = pedido.receta_final(&trabajo);
+    if pedido.receta.es_automatica() {
+        eprintln!("la IA eligió: {}", receta.nombre);
+    }
     let formatos = match opcion.get("formatos") {
         Some(lista) => lista.split(',').map(|f| f.trim().to_owned()).collect(),
         None => std::iter::once(receta.formato.clone())
@@ -185,6 +196,9 @@ fn nuevo(
         marca: pedido.marca.clone(),
         formatos,
         version: 0,
+        material: pedido.material.clone(),
+        pedida: pedido.receta.id.clone(),
+        peticion: pedido.peticion.clone(),
     };
     encargo.crear(proyecto, &nombre).map_err(|e| e.to_string())
 }

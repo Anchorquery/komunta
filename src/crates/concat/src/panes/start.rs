@@ -395,6 +395,16 @@ impl StartPane {
             self.error = t("start.chooseWhereProjectFolder");
             return;
         }
+        // Komunta: a project to montage with AI is checked for it before
+        // it is made, so a missing folder is said here and not after.
+        let montage = studio.montaje.enabled;
+        if montage {
+            let studio: &Studio = studio;
+            if let Err(error) = studio.montaje.ready(studio) {
+                self.error = error;
+                return;
+            }
+        }
         let opened = projects::create(&self.location, &name, width, height, num, den)
             .and_then(|info| studio.open_project(info));
         self.busy = false;
@@ -410,6 +420,14 @@ impl StartPane {
                 if !dropped.is_empty() {
                     studio.handle(crate::panes::Msg::Media(
                         crate::panes::media_bin::MediaMsg::Import(dropped),
+                    ));
+                }
+                // Komunta: the montage runs in the project just opened, in
+                // the frame its shape is.
+                if montage {
+                    studio.montaje.frame_from(width, height);
+                    studio.handle(crate::panes::Msg::Montaje(
+                        crate::panes::montaje::MontajeMsg::Run,
                     ));
                 }
             }

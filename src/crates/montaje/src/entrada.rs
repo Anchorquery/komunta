@@ -13,6 +13,9 @@ use crate::Error;
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Plan {
+    /// The recipe it was made with; for an automatic request, the one the
+    /// AI chose.
+    pub plantilla: String,
     /// The voice line, in order.
     pub tomas: Vec<Toma>,
     /// On-screen captions.

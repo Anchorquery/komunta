@@ -887,9 +887,9 @@ pub struct Studio {
     // ── the launch screen ──
     pub on_start: bool,
     pub start: crate::panes::start::StartPane,
-    /// Komunta's "Nuevo montaje" sheet.
+    /// Komunta's montage with AI: New project's section, the sheet, the run.
     pub montaje: crate::panes::montaje::MontajePane,
-    /// Komunta's "Guion de montaje" pane.
+    /// Komunta's Montaje pane: the montage's script.
     pub guion: crate::panes::guion::GuionPane,
     pub recents: Vec<projects::Recent>,
     pub posters: HashMap<String, slint::Image>,
@@ -10729,6 +10729,7 @@ impl Studio {
         app.set_montaje(self.montaje.data(self));
         app.set_montaje_settings(self.montaje.settings_data(self));
         self.guion.publish(app);
+        self.montaje.publish_run(app);
         app.set_recents_total(self.recents.len() as i32);
         sync(
             &models.recents,
