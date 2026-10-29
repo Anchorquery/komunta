@@ -531,6 +531,10 @@ export component App inherits Window {
                     if (!root.start.busy) { root.start-dismiss(); }
                     return accept;
                 }
+                if (root.montaje.open) {
+                    if (!root.montaje.busy) { root.montaje-close(); }
+                    return accept;
+                }
                 // The tool cards, under the sheets: the one in front first.
                 // A floating card closes with its job running, which goes
                 // on and is there again when it is opened; a phone's sheet
