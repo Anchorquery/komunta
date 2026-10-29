@@ -9,9 +9,25 @@ Editor de vídeo interno del equipo de comunicación de Komunikia: montaje autom
 - **Fase 0 (esta):** fork de Concat v0.2.8 con otro nombre, icono y color de acento (azul Komunikia), carpeta de ajustes propia (`app.komunta.editor`), instaladores de Windows con identificadores propios y build en GitHub Actions.
 - **Fase 1 (hecha):** `crates/montaje` convierte un trabajo del motor de montaje (`ia/plan.json`, `analisis.json`, `inventario.json`) en un proyecto que Komunta abre y se puede editar. La línea de tiempo da los mismos números que el motor en Python (prueba dorada con trabajos reales).
 - **Fase 2 (hecha):** recetas editables en lugar de plantillas fijas (subtítulos del documento, de la voz, solo frases clave o ninguno), kit de marca (fuentes, colores, cierre, destello), música con ducking bajo la voz, subtítulos apilados, garabatos y una línea de tiempo por formato (vertical, 16:9, 1:1).
-- **Siguientes:** pantalla «Nuevo montaje» y panel «Guion de montaje» dentro de la app, el resto del motor en Rust (análisis, transcripción, plan con IA), agente de IA dentro del editor, subtítulos es/eu, aparición palabra a palabra.
+- **Fase 3 (hecha):** pantallas dentro de la app: «Nuevo montaje» en la pantalla de inicio, panel «Guion de montaje» y Ajustes › Montaje e IA. Por debajo sigue trabajando el motor en Python.
+- **Siguientes:** el resto del motor en Rust (análisis, transcripción, plan con IA), «Corregir hablando» y agente de IA dentro del editor, aparición palabra a palabra.
 
-### Montaje desde un trabajo del motor
+### Montaje desde la app
+
+1. **Ajustes › Montaje e IA**: carpeta del motor (por defecto `Escritorio/apps/automatizacion_videos`, o la variable `KOMUNTA_MOTOR`), Python (vacío = el `.venv` del motor) y la IA que planifica. Las recetas propias del equipo van en la carpeta que enseña esa página.
+2. **Nuevo montaje** en la pantalla de inicio: carpeta del material, nombre y lugar del proyecto; tipo de vídeo (receta), «¿Qué quieres?» con tus palabras, formatos y marca; subtítulos (del guion, de la voz, frases clave o ninguno), guion opcional e idioma. El motor tarda unos minutos y el proyecto se abre solo.
+3. **Guion de montaje** (sale donde estaba la Biblioteca): pulsa una palabra para cortarla, sube, baja o quita tomas, corrige subtítulos y quita recursos. **Aplicar al vídeo** guarda el plan como versión nueva en el trabajo y añade el montaje como líneas de tiempo nuevas («Montaje 2 · Vertical»…), sin tocar las que ya editaste.
+
+El proyecto guarda en `montaje.json` qué trabajo, receta, marca y formatos lo hicieron.
+
+### Montaje desde la línea de órdenes
+
+```sh
+cd src
+cargo run -p montaje -- nuevo <material> <carpeta del proyecto> --motor <carpeta del motor> [--receta <id>] [--peticion "<texto>"] [--guion <archivo>] [--idioma es|eu] [--marca <id>] [--formatos vertical,16x9] [--ia <cerebro>]
+```
+
+### Montaje desde un trabajo ya hecho del motor
 
 ```sh
 cd src
