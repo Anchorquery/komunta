@@ -9,6 +9,7 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::receta::Receta;
@@ -142,16 +143,17 @@ pub struct Avance {
 
 /// A run that can be stopped from another thread.
 #[derive(Clone, Default)]
-pub struct Parada(Arc<Mutex<(Option<u32>, bool)>>);
+pub struct Parada {
+    /// The engine's process while it runs.
+    pid: Arc<Mutex<Option<u32>>>,
+    cancelada: Arc<AtomicBool>,
+}
 
 impl Parada {
     /// Stops the run and whatever it started (FFmpeg, the AI's CLI).
     pub fn cancelar(&self) {
-        let pid = {
-            let mut estado = self.0.lock().expect("not poisoned");
-            estado.1 = true;
-            estado.0
-        };
+        self.cancelada.store(true, Ordering::SeqCst);
+        let pid = *self.pid.lock().expect("not poisoned");
         let Some(pid) = pid else {
             return;
         };
@@ -171,7 +173,13 @@ impl Parada {
 
     /// Whether [`Parada::cancelar`] was called.
     pub fn cancelada(&self) -> bool {
-        self.0.lock().expect("not poisoned").1
+        self.cancelada.load(Ordering::SeqCst)
+    }
+
+    /// The flag [`Parada::cancelar`] raises, for work in this process that
+    /// looks at it as it goes: whisper, between its chunks of work.
+    pub fn bandera(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancelada)
     }
 }
 
@@ -349,7 +357,7 @@ fn ejecutar(
     let mut hijo: Child = orden
         .spawn()
         .map_err(|e| FalloMotor::Arrancar(python.clone(), e))?;
-    parada.0.lock().expect("not poisoned").0 = Some(hijo.id());
+    *parada.pid.lock().expect("not poisoned") = Some(hijo.id());
     if parada.cancelada() {
         // Stopped while it was starting.
         parada.cancelar();
@@ -373,7 +381,7 @@ fn ejecutar(
         }
     }
     let estado = hijo.wait();
-    parada.0.lock().expect("not poisoned").0 = None;
+    *parada.pid.lock().expect("not poisoned") = None;
     let errores = errores.join().unwrap_or_default();
     if parada.cancelada() {
         return Err(FalloMotor::Cancelado);

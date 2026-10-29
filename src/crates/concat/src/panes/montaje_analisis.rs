@@ -1,8 +1,12 @@
 //! A montage's clips analysed here, before the engine runs: whisper and
 //! the voice detector from the app's models folder, YuNet for the faces,
-//! into the job's `analisis.json`. What cannot be done here - a whisper
-//! model not downloaded, a clip that will not decode - the engine does
+//! into the job's `analisis.json`. What is not done here the engine does
 //! after, as it always did: it only analyses the clips the file lacks.
+//!
+//! Only with a graphics card under whisper. On the processor whisper.cpp
+//! encodes each clip three or four times (the language, the words, the
+//! Basque contrast) and took five times the engine's CTranslate2 on CUDA
+//! for the same five clips - slower than the engine on the processor too.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -33,6 +37,13 @@ pub(crate) fn analizar(
     parada: &Parada,
     mut avisar: impl FnMut(Avance),
 ) -> Result<(), Cancelado> {
+    match grafica() {
+        Ok(grafica) => log::info!("montaje: the clips are analysed here, whisper on {grafica}"),
+        Err(motivo) => {
+            log::info!("montaje: the engine analyses the clips: {motivo}");
+            return Ok(());
+        }
+    }
     let modelos = match modelos(dirs, ia, idioma) {
         Ok(modelos) => modelos,
         Err(motivo) => {
@@ -47,6 +58,7 @@ pub(crate) fn analizar(
             return Ok(());
         }
     };
+    oido.parar_con(parada.bandera());
     let mut detector = Detector::new()
         .inspect_err(|error| log::warn!("montaje: the clips are analysed without faces: {error}"))
         .ok();
@@ -82,6 +94,14 @@ pub(crate) fn analizar(
             Ok(())
         }
     }
+}
+
+/// The graphics card whisper would run on, or why it would not.
+fn grafica() -> Result<String, String> {
+    transcribe::cpu_backend()?;
+    transcribe::gpu_backend().ok_or_else(|| {
+        "whisper has no graphics card here, and on the processor the engine is faster".into()
+    })
 }
 
 /// The model files for `idioma`, or why the analysis cannot run here.

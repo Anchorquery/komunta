@@ -61,6 +61,21 @@ pub enum Segunda {
     Contrastar,
 }
 
+/// The language of a clip from whisper's guess over all of them: Spanish
+/// or Basque, whichever it finds likelier, and how sure it is between the
+/// two. The team shoots in nothing else, and a second of speech can come
+/// out German at 20% - and then be heard, and written, in German.
+pub fn entre_los_dos(castellano: f64, euskera: f64) -> (Idioma, f64) {
+    let total = castellano + euskera;
+    if total <= 0.0 {
+        (Idioma::castellano(), 0.0)
+    } else if euskera > castellano {
+        (Idioma::euskera(), euskera / total)
+    } else {
+        (Idioma::castellano(), castellano / total)
+    }
+}
+
 /// The second pass a first one calls for. None when the language was
 /// given, or when one model serves both languages.
 pub fn segunda_pasada(adivinado: &Idioma, probabilidad: f64, dado: bool, un_solo_modelo: bool) -> Segunda {
@@ -102,6 +117,15 @@ pub fn gana_la_segunda(primera: &[Tramo], segunda: &[Tramo]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_guess_is_spanish_or_basque() {
+        let (idioma, seguro) = entre_los_dos(0.06, 0.02);
+        assert_eq!(idioma, Idioma::castellano());
+        assert!((seguro - 0.75).abs() < 1e-9);
+        assert_eq!(entre_los_dos(0.1, 0.3).0, Idioma::euskera());
+        assert_eq!(entre_los_dos(0.0, 0.0), (Idioma::castellano(), 0.0));
+    }
 
     #[test]
     fn a_basque_guess_is_heard_again_in_basque() {

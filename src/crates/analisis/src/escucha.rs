@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use whisper_rs::{
     DtwMode, DtwModelPreset, DtwParameters, FullParams, SamplingStrategy, WhisperContext,
@@ -41,6 +43,9 @@ pub enum Error {
     /// whisper failed mid-run.
     #[error("whisper failed: {0}")]
     Whisper(#[from] whisper_rs::WhisperError),
+    /// The flag given to [`Oido::parar_con`] was raised.
+    #[error("stopped")]
+    Parado,
 }
 
 /// The engine's opening line for Spanish (`transcripcion.prompt_es`).
@@ -72,6 +77,7 @@ pub struct Oido {
     cargados: HashMap<PathBuf, WhisperContext>,
     detector: Option<WhisperVadContext>,
     hilos: usize,
+    parada: Arc<AtomicBool>,
 }
 
 /// One run of whisper over a clip's speech, in one language.
@@ -107,7 +113,14 @@ impl Oido {
             cargados: HashMap::new(),
             detector: None,
             hilos: hilos(),
+            parada: Arc::default(),
         })
+    }
+
+    /// Stops whisper where it stands once `parada` is raised: the clip
+    /// being heard then fails with [`Error::Parado`].
+    pub fn parar_con(&mut self, parada: Arc<AtomicBool>) {
+        self.parada = parada;
     }
 
     /// Where in `audio` (16 kHz mono) somebody speaks, in seconds.
@@ -166,13 +179,25 @@ impl Oido {
             return Ok(Pasada { idioma, probabilidad: 0.0, segmentos: Vec::new(), mapa });
         }
         let hilos = self.hilos;
+        let parada = Arc::clone(&self.parada);
         let contexto = self.contexto(&ruta)?;
         let mut estado = contexto.create_state()?;
         let (idioma, probabilidad) = match idioma {
             Some(idioma) => (idioma.clone(), 1.0),
             None => adivinar(&mut estado, &habla, hilos)?,
         };
-        estado.full(parametros(idioma.codigo(), prompt.as_deref(), hilos), &habla)?;
+        let mut parametros = parametros(idioma.codigo(), prompt.as_deref(), hilos);
+        // SAFETY: `abort_when_set` reads the `AtomicBool` inside `parada`,
+        // which is held until `full` has returned.
+        unsafe {
+            parametros.set_abort_callback(Some(concat_speech::transcribe::abort_when_set));
+            parametros.set_abort_callback_user_data(Arc::as_ptr(&parada) as *mut std::ffi::c_void);
+        }
+        let oido = estado.full(parametros, &habla);
+        if parada.load(Ordering::Relaxed) {
+            return Err(Error::Parado);
+        }
+        oido?;
         let fin = contexto.token_eot();
         let segmentos = estado.as_iter().map(|segmento| tokens_de(&segmento, fin)).collect();
         Ok(Pasada { idioma, probabilidad, segmentos, mapa })
@@ -196,14 +221,17 @@ impl Oido {
     }
 }
 
-/// whisper's guess at the language, from the first thirty seconds, and how
-/// sure it is.
+/// whisper's guess at the language, from the first thirty seconds, between
+/// Spanish and Basque ([`idioma::entre_los_dos`]), and how sure it is.
 fn adivinar(estado: &mut WhisperState, audio: &[f32], hilos: usize) -> Result<(Idioma, f64), Error> {
     estado.pcm_to_mel(audio, hilos)?;
-    let (id, probabilidades) = estado.lang_detect(0, hilos)?;
-    let codigo = whisper_rs::get_lang_str(id).unwrap_or("es");
-    let probabilidad = probabilidades.get(id as usize).copied().unwrap_or(0.0);
-    Ok((Idioma::from(codigo), f64::from(probabilidad)))
+    let (_, probabilidades) = estado.lang_detect(0, hilos)?;
+    let de = |codigo: &str| {
+        whisper_rs::get_lang_id(codigo)
+            .and_then(|id| probabilidades.get(usize::try_from(id).ok()?))
+            .map_or(0.0, |&p| f64::from(p))
+    };
+    Ok(idioma::entre_los_dos(de("es"), de("eu")))
 }
 
 /// The engine's settings: beam of five, no temperature fallback, each

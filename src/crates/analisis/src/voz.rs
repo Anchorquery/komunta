@@ -2,11 +2,14 @@
 //! clip mostly spoken to camera, rather than a cutaway.
 
 /// The stretches the voice detector heard speech in, in seconds, rounded
-/// to the hundredth as `analisis.json` keeps them.
-pub fn tramos(segundos: impl IntoIterator<Item = (f64, f64)>) -> Vec<[f64; 2]> {
+/// to the hundredth as `analisis.json` keeps them, and within the clip's
+/// `duracion`: the detector pads each stretch, past the end too.
+pub fn tramos(segundos: impl IntoIterator<Item = (f64, f64)>, duracion: f64) -> Vec<[f64; 2]> {
+    let dentro = |t: f64| centesimas(t.clamp(0.0, duracion));
     segundos
         .into_iter()
-        .map(|(inicio, fin)| [centesimas(inicio), centesimas(fin)])
+        .map(|(inicio, fin)| [dentro(inicio), dentro(fin)])
+        .filter(|[inicio, fin]| fin > inicio)
         .collect()
 }
 
@@ -34,7 +37,14 @@ mod tests {
 
     #[test]
     fn stretches_are_rounded() {
-        assert_eq!(tramos([(0.123, 1.456)]), [[0.12, 1.46]]);
+        assert_eq!(tramos([(0.123, 1.456)], 5.0), [[0.12, 1.46]]);
+    }
+
+    #[test]
+    fn stretches_end_with_the_clip() {
+        let voz = tramos([(0.0, 3.55), (3.6, 3.9)], 3.532);
+        assert_eq!(voz, [[0.0, 3.53]]);
+        assert_eq!(ratio(&voz, 3.532), 1.0);
     }
 
     #[test]

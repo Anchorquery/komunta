@@ -68,7 +68,7 @@ pub enum Error {
 /// a clip with no sound stream, which is heard as silence.
 pub fn escuchar(oido: &mut Oido, ruta: &Path, duracion: f64, con_audio: bool, ajustes: &Ajustes) -> Result<Escucha, Error> {
     let crudo = if con_audio { leer(ruta, Vec::new())? } else { Vec::new() };
-    let voz = if crudo.is_empty() { Vec::new() } else { voz::tramos(oido.voz(&crudo)?) };
+    let voz = if crudo.is_empty() { Vec::new() } else { voz::tramos(oido.voz(&crudo)?, duracion) };
     let pares: Vec<(f64, f64)> = voz.iter().map(|&[inicio, fin]| (inicio, fin)).collect();
     let audio_info = Ruido::medir(&crudo, &pares, ajustes.umbral_ruido_db);
     let ratio_voz = voz::ratio(&voz, duracion);

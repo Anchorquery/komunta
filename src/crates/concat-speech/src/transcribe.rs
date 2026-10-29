@@ -178,7 +178,14 @@ fn models_dir(dirs: &AppDirs) -> Result<PathBuf, String> {
 
 /// whisper's abort callback: `user_data` is the run's cancel flag, and a
 /// true here stops the computation where it stands. See `transcribe`.
-unsafe extern "C" fn abort_when_set(user_data: *mut std::ffi::c_void) -> bool {
+/// whisper-rs's own `set_abort_callback_safe` reads its boxed closure back
+/// as the wrong type, so the flag is handed over raw instead.
+///
+/// # Safety
+///
+/// `user_data` must point to an `AtomicBool` that lives for as long as
+/// whisper may call this: until `full` has returned.
+pub unsafe extern "C" fn abort_when_set(user_data: *mut std::ffi::c_void) -> bool {
     // SAFETY: the caller passed `Arc::as_ptr` of an `AtomicBool` it keeps
     // alive for as long as whisper may call this.
     unsafe { (*(user_data as *const AtomicBool)).load(Ordering::Relaxed) }
@@ -205,28 +212,7 @@ unsafe extern "C" fn abort_when_set(user_data: *mut std::ffi::c_void) -> bool {
 pub fn cpu_backend() -> Result<String, String> {
     use whisper_rs::whisper_rs_sys as sys;
 
-    fn cpu() -> Option<String> {
-        // SAFETY: a lookup in ggml's registry of devices, which ggml
-        // guards itself; the description is a C string ggml owns for the
-        // life of the process.
-        unsafe {
-            let device = sys::ggml_backend_dev_by_type(
-                sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_CPU,
-            );
-            if device.is_null() {
-                return None;
-            }
-            let description = sys::ggml_backend_dev_description(device);
-            Some(if description.is_null() {
-                "CPU".to_owned()
-            } else {
-                std::ffi::CStr::from_ptr(description)
-                    .to_string_lossy()
-                    .into_owned()
-            })
-        }
-    }
-
+    let cpu = || device(sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_CPU);
     static LOADED: std::sync::OnceLock<Result<String, String>> = std::sync::OnceLock::new();
     LOADED
         .get_or_init(|| {
@@ -266,6 +252,37 @@ pub fn cpu_backend() -> Result<String, String> {
             ))
         })
         .clone()
+}
+
+/// The graphics card whisper runs on, if ggml has a backend for one
+/// (Vulkan, CUDA, Metal): None in a build with only the CPU kernels. Ask
+/// after [`cpu_backend`], which loads the modules there are.
+pub fn gpu_backend() -> Option<String> {
+    use whisper_rs::whisper_rs_sys as sys;
+    device(sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU)
+        .or_else(|| device(sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU))
+}
+
+/// The first device of `kind` ggml has registered, by its description.
+fn device(kind: whisper_rs::whisper_rs_sys::ggml_backend_dev_type) -> Option<String> {
+    use whisper_rs::whisper_rs_sys as sys;
+    // SAFETY: a lookup in ggml's registry of devices, which ggml guards
+    // itself; the description is a C string ggml owns for the life of the
+    // process.
+    unsafe {
+        let device = sys::ggml_backend_dev_by_type(kind);
+        if device.is_null() {
+            return None;
+        }
+        let description = sys::ggml_backend_dev_description(device);
+        Some(if description.is_null() {
+            "unnamed".to_owned()
+        } else {
+            std::ffi::CStr::from_ptr(description)
+                .to_string_lossy()
+                .into_owned()
+        })
+    }
 }
 
 /// Where model `id` lives once downloaded: `<models folder>/ggml-<id>.bin`.
