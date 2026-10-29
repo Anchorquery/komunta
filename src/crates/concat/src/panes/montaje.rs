@@ -538,7 +538,13 @@ impl MontajePane {
                 })
                 .map_err(|error| match error {
                     FalloMotor::Cancelado => String::new(),
-                    error => error.to_string(),
+                    error => {
+                        // The panel says the cause; the traceback is for the log.
+                        if let FalloMotor::Fallo(cola) = &error {
+                            log::warn!("montaje: the engine's last lines:\n{cola}");
+                        }
+                        error.resumen()
+                    }
                 })?;
                 crate::host::on_ui(|studio, _, _| studio.handle(Msg::Montaje(MontajeMsg::Laying)));
                 let encargo = Encargo {

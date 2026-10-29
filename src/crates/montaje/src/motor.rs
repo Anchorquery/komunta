@@ -192,6 +192,52 @@ pub enum FalloMotor {
     SinPlan(PathBuf),
 }
 
+impl FalloMotor {
+    /// What to tell the person, in a sentence: the cause, not the engine's
+    /// traceback, which is for the log.
+    pub fn resumen(&self) -> String {
+        let texto = match self {
+            FalloMotor::Fallo(cola) => resumir(cola),
+            otro => otro.to_string(),
+        };
+        let mut letras = texto.chars();
+        letras.next().map_or(texto.clone(), |primera| {
+            primera.to_uppercase().chain(letras).collect()
+        })
+    }
+}
+
+/// The last line of a Python traceback is the error itself; the ones a
+/// person can do something about are said in plain words.
+fn resumir(cola: &str) -> String {
+    let ultima = cola
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|linea| !linea.is_empty())
+        .unwrap_or("");
+    let bajo = ultima.to_lowercase();
+    if bajo.contains("out of memory") {
+        return "la tarjeta gráfica se quedó sin memoria. Cierra los programas que la estén usando \
+                (juegos, otro editor) y vuelve a intentarlo."
+            .into();
+    }
+    if bajo.starts_with("modulenotfounderror") {
+        return format!("al motor le falta una pieza de Python ({ultima}). Revisa su instalación.");
+    }
+    if ultima.is_empty() {
+        return "el motor se paró sin decir por qué.".into();
+    }
+    // `RuntimeError: lo que pasó` → `lo que pasó`.
+    let mensaje = ultima
+        .split_once(": ")
+        .filter(|(clase, _)| {
+            !clase.contains(' ') && (clase.ends_with("Error") || clase.ends_with("Exception"))
+        })
+        .map_or(ultima, |(_, mensaje)| mensaje);
+    format!("el motor falló: {mensaje}")
+}
+
 /// Ingest, analysis and plan for a request. Calls `avisar` with each
 /// progress line; returns the job folder once `ia/plan.json` is there.
 pub fn analizar(
@@ -349,6 +395,32 @@ pub fn ahora() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failure_is_told_in_a_sentence() {
+        let traza = "Traceback (most recent call last):\n  File \"x.py\", line 60, in pasada\n    \
+                     return list(segs), info\nRuntimeError: CUDA failed with error out of memory\n";
+        let dicho = FalloMotor::Fallo(traza.into()).resumen();
+        assert!(dicho.starts_with("La tarjeta gráfica se quedó sin memoria"), "{dicho}");
+        assert!(!dicho.contains("Traceback"));
+
+        let otro = "Traceback...\nValueError: el plan no tiene tomas\n\n";
+        assert_eq!(
+            FalloMotor::Fallo(otro.into()).resumen(),
+            "El motor falló: el plan no tiene tomas"
+        );
+        assert_eq!(
+            FalloMotor::Fallo("algo raro: sin clase".into()).resumen(),
+            "El motor falló: algo raro: sin clase"
+        );
+        assert_eq!(
+            FalloMotor::Fallo(String::new()).resumen(),
+            "El motor se paró sin decir por qué."
+        );
+        assert!(FalloMotor::Fallo("ModuleNotFoundError: No module named 'cv2'".into())
+            .resumen()
+            .contains("le falta una pieza de Python"));
+    }
 
     #[test]
     fn progress_lines_are_read() {
