@@ -76,6 +76,15 @@ pub struct Ia {
 }
 
 impl Ia {
+    /// The whisper models that hear Spanish and Basque, by their ggml ids:
+    /// the chosen ones, or [`WHISPER_ES`] and [`WHISPER_EU`].
+    pub fn whisper(&self) -> (&str, &str) {
+        (
+            self.transcripcion_es.as_deref().unwrap_or(WHISPER_ES),
+            self.transcripcion_eu.as_deref().unwrap_or(WHISPER_EU),
+        )
+    }
+
     /// The model chosen for `proveedor`, or its default.
     pub fn modelo(&self, proveedor: Proveedor) -> &str {
         self.modelos

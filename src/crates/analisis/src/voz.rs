@@ -12,7 +12,10 @@ pub fn tramos(segundos: impl IntoIterator<Item = (f64, f64)>) -> Vec<[f64; 2]> {
 
 /// How much of the clip is speech, 0 to 1 and rounded to the hundredth.
 pub fn ratio(voz: &[[f64; 2]], duracion: f64) -> f64 {
-    let hablado: f64 = voz.iter().map(|[inicio, fin]| fin - inicio).sum();
+    // A fold from +0: an empty f64 sum is -0, which the JSON would keep.
+    let hablado = voz
+        .iter()
+        .fold(0.0, |total, [inicio, fin]| total + fin - inicio);
     centesimas(hablado / duracion.max(0.01))
 }
 
@@ -32,6 +35,11 @@ mod tests {
     #[test]
     fn stretches_are_rounded() {
         assert_eq!(tramos([(0.123, 1.456)]), [[0.12, 1.46]]);
+    }
+
+    #[test]
+    fn no_speech_is_a_plain_zero() {
+        assert!(ratio(&[], 3.0).is_sign_positive());
     }
 
     #[test]

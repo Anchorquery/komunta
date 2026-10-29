@@ -43,6 +43,12 @@ pub enum Error {
     Whisper(#[from] whisper_rs::WhisperError),
 }
 
+/// The engine's opening line for Spanish (`transcripcion.prompt_es`).
+pub const PROMPT_CASTELLANO: &str = "Eh, pues, vale, bueno, o sea, este... Hoy quiero explicarte algo.";
+
+/// The engine's opening line for Basque (`transcripcion.prompt_eu`).
+pub const PROMPT_EUSKERA: &str = "Ba, beno, eh, ba... Gaur zerbait azaldu nahi dizut.";
+
 /// The model files and the prompts a run uses.
 #[derive(Clone, Debug)]
 pub struct Modelos {

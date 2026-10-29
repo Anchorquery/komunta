@@ -37,3 +37,7 @@ required-features = ["escucha"]
 [[example]]
 name = "mirar"
 required-features = ["imagen"]
+
+[[example]]
+name = "trabajo"
+required-features = ["escucha", "imagen"]

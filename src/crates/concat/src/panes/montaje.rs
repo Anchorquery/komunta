@@ -16,7 +16,9 @@
 
 use std::path::{Path, PathBuf};
 
+use concat_host::AppDirs;
 use concat_project::Project;
+use montaje::ia::Ia;
 use montaje::llavero::LlaveroSistema;
 use montaje::motor::{self, Avance, FalloMotor, Parada};
 use montaje::proveedores::Proveedor;
@@ -27,6 +29,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
 use crate::panes::montaje_ajustes::{AjustesIa, nombre_cerebro};
+use crate::panes::montaje_analisis;
 use crate::platform;
 use crate::studio::{Studio, home_folder};
 use crate::ui::{App, GuionPanel, MontajeData, MontajeSettingsData, PaneKind};
@@ -145,6 +148,32 @@ fn with_automatic(recipes: Vec<Receta>) -> Vec<Receta> {
     std::iter::once(receta::automatica())
         .chain(recipes.into_iter().filter(|r| !r.es_automatica()))
         .collect()
+}
+
+/// The clips analysed here before the engine runs (see
+/// [`montaje_analisis`]): the engine lists them, this analyses them, and
+/// the engine then skips what is done. An engine too old to list them
+/// analyses everything itself. Err only for a stop, as an empty message.
+fn analizar_aqui(
+    engine: &Motor,
+    pedido: &Pedido,
+    dirs: &AppDirs,
+    ia: &Ia,
+    parada: &Parada,
+    avisar: impl FnMut(Avance),
+) -> Result<(), String> {
+    let trabajo = match motor::inventariar(engine, pedido, parada) {
+        Ok(trabajo) => trabajo,
+        Err(FalloMotor::Cancelado) => return Err(String::new()),
+        Err(error) => {
+            log::warn!(
+                "montaje: the engine did not list the clips, it analyses them itself: {error}"
+            );
+            return Ok(());
+        }
+    };
+    montaje_analisis::analizar(dirs, ia, pedido.idioma.as_deref(), &trabajo, parada, avisar)
+        .map_err(|_| String::new())
 }
 
 /// The engine as Settings has it, or where it usually is.
@@ -521,23 +550,28 @@ impl MontajePane {
             studio.dock.replace(PaneKind::Media, PaneKind::Guion);
         }
         let parada = self.parada.clone();
+        let dirs = studio.host.dirs.clone();
+        let ia = studio.prefs.montaje.ia.clone();
         crate::host::spawn(
             move || -> Result<(Encargo, Project), String> {
-                let trabajo = motor::analizar(&engine, &pedido, &parada, |avance| {
+                let avisar = |avance| {
                     crate::host::on_ui(move |studio, _, _| {
                         studio.handle(Msg::Montaje(MontajeMsg::Progress(avance)));
                     });
-                })
-                .map_err(|error| match error {
-                    FalloMotor::Cancelado => String::new(),
-                    error => {
-                        // The panel says the cause; the traceback is for the log.
-                        if let FalloMotor::Fallo(cola) = &error {
-                            log::warn!("montaje: the engine's last lines:\n{cola}");
+                };
+                analizar_aqui(&engine, &pedido, &dirs, &ia, &parada, avisar)?;
+                let trabajo = motor::analizar(&engine, &pedido, &parada, avisar).map_err(
+                    |error| match error {
+                        FalloMotor::Cancelado => String::new(),
+                        error => {
+                            // The panel says the cause; the traceback is for the log.
+                            if let FalloMotor::Fallo(cola) = &error {
+                                log::warn!("montaje: the engine's last lines:\n{cola}");
+                            }
+                            error.resumen()
                         }
-                        error.resumen()
-                    }
-                })?;
+                    },
+                )?;
                 crate::host::on_ui(|studio, _, _| studio.handle(Msg::Montaje(MontajeMsg::Laying)));
                 let encargo = Encargo {
                     receta: pedido.receta_final(&trabajo),

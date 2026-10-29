@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use analisis::clip::{self, Ajustes};
-use analisis::escucha::{Modelos, Oido};
+use analisis::escucha::{self, Modelos, Oido};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut argumentos = std::env::args().skip(1);
@@ -21,12 +21,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         castellano,
         euskera,
         voz: carpeta.join("ggml-silero-v5.1.2.bin"),
-        prompt_castellano: Some("Eh, pues, vale, bueno, o sea, este... Hoy quiero explicarte algo.".into()),
-        prompt_euskera: Some("Ba, beno, eh, ba... Gaur zerbait azaldu nahi dizut.".into()),
+        prompt_castellano: Some(escucha::PROMPT_CASTELLANO.into()),
+        prompt_euskera: Some(escucha::PROMPT_EUSKERA.into()),
     })?;
     for ruta in argumentos {
         let inicio = std::time::Instant::now();
-        let escucha = clip::escuchar(&mut oido, Path::new(&ruta), duracion(&ruta), true, &Ajustes::default())?;
+        let escucha = clip::escuchar(
+            &mut oido,
+            Path::new(&ruta),
+            duracion(&ruta),
+            true,
+            &Ajustes::default(),
+        )?;
         eprintln!("{ruta}: {:.1} s", inicio.elapsed().as_secs_f64());
         println!("{}", serde_json::to_string(&escucha)?);
     }

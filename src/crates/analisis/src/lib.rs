@@ -27,6 +27,7 @@ pub mod palabras;
 pub mod recorte;
 pub mod ruido;
 pub mod tokens;
+pub mod trabajo;
 pub mod transcripcion;
 pub mod visual;
 pub mod voz;

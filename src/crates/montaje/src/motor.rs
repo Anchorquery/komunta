@@ -1,8 +1,11 @@
 //! The Python engine, run for what is not in Rust yet: reading the
-//! material, transcribing it and asking the AI for the plan
-//! (`python -m motor analizar`). It reports progress on its standard output
-//! as `[fase  45%] mensaje` lines, which come back here as [`Avance`]s.
+//! material (`python -m motor inventariar`), and what the Rust analysis
+//! left, describing the clips and asking the AI for the plan
+//! (`python -m motor analizar`). It reports progress on its standard
+//! output as `[fase  45%] mensaje` lines, which come back here as
+//! [`Avance`]s.
 
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -241,8 +244,27 @@ fn resumir(cola: &str) -> String {
     format!("el motor falló: {mensaje}")
 }
 
+/// Only the ingest: the engine reads the material folder and writes the
+/// job's `inventario.json` - the clips, their ids and lengths - so the
+/// analysis can run here before [`analizar`]. Returns the job folder.
+pub fn inventariar(motor: &Motor, pedido: &Pedido, parada: &Parada) -> Result<PathBuf, FalloMotor> {
+    let mut argumentos: Vec<OsString> = vec!["inventariar".into(), pedido.material.clone().into()];
+    argumentos.extend(["--id".into(), pedido.id.clone().into()]);
+    if let Some(guion) = &pedido.guion {
+        argumentos.extend(["--guion".into(), guion.clone().into()]);
+    }
+    let mut trabajo = None;
+    let ultimas = ejecutar(motor, pedido, argumentos, parada, |linea| {
+        if let Some(inventario) = linea.strip_prefix("Inventario: ") {
+            trabajo = Path::new(inventario.trim()).parent().map(PathBuf::from);
+        }
+    })?;
+    trabajo.ok_or_else(|| FalloMotor::Fallo(ultimas.join("\n")))
+}
+
 /// Ingest, analysis and plan for a request. Calls `avisar` with each
 /// progress line; returns the job folder once `ia/plan.json` is there.
+/// Clips already in the job's `analisis.json` are not analysed again.
 pub fn analizar(
     motor: &Motor,
     pedido: &Pedido,
@@ -251,43 +273,85 @@ pub fn analizar(
 ) -> Result<PathBuf, FalloMotor> {
     let reglas = std::env::temp_dir().join(format!("komunta-reglas-{}.md", pedido.id));
     std::fs::write(&reglas, pedido.reglas()).map_err(FalloMotor::Preparar)?;
+    let mut argumentos: Vec<OsString> = vec!["analizar".into(), pedido.material.clone().into()];
+    argumentos.extend(["--id".into(), pedido.id.clone().into()]);
+    argumentos.extend(["--plantilla".into(), pedido.receta.id.clone().into()]);
+    argumentos.extend(["--reglas".into(), reglas.clone().into()]);
+    let opcionales = [
+        ("--guion", pedido.guion.clone().map(OsString::from)),
+        ("--idioma", pedido.idioma.clone().map(OsString::from)),
+        ("--marca", pedido.marca.clone().map(OsString::from)),
+        ("--ia", pedido.cerebro.clone().map(OsString::from)),
+    ];
+    for (bandera, valor) in opcionales {
+        if let Some(valor) = valor {
+            argumentos.extend([bandera.into(), valor]);
+        }
+    }
+    let mut trabajo = None;
+    let mut sin_plan = None;
+    let corrida = ejecutar(motor, pedido, argumentos, parada, |linea| {
+        if let Some(avance) = leer_avance(linea) {
+            avisar(avance);
+        } else if let Some(plan) = linea.strip_prefix("Plan: ") {
+            trabajo = Path::new(plan.trim())
+                .parent()
+                .and_then(Path::parent)
+                .map(PathBuf::from);
+        } else if let Some(resto) = linea.strip_prefix("Pedido listo: ") {
+            sin_plan = resto.split(" -> ").next().map(|p| PathBuf::from(p.trim()));
+        }
+    });
+    let _ = std::fs::remove_file(&reglas);
+    let ultimas = corrida?;
+    match (trabajo, sin_plan) {
+        (Some(trabajo), _) => Ok(trabajo),
+        (None, Some(pedido)) => Err(FalloMotor::SinPlan(pedido)),
+        (None, None) => Err(FalloMotor::Fallo(ultimas.join("\n"))),
+    }
+}
+
+/// Runs `python -m motor <argumentos>` for `pedido`, handing each line of
+/// its standard output to `leer`, until it ends or `parada` stops it.
+/// Returns its last lines when it ends well; when it does not, the tail of
+/// its standard error - the traceback - as the failure.
+fn ejecutar(
+    motor: &Motor,
+    pedido: &Pedido,
+    argumentos: Vec<OsString>,
+    parada: &Parada,
+    mut leer: impl FnMut(&str),
+) -> Result<Vec<String>, FalloMotor> {
     let python = motor.interprete();
     let mut orden = Command::new(&python);
     orden
         .current_dir(&motor.carpeta)
-        .args(["-X", "utf8", "-u", "-m", "motor", "analizar"])
-        .arg(&pedido.material)
-        .args(["--id", &pedido.id, "--plantilla", &pedido.receta.id])
-        .arg("--reglas")
-        .arg(&reglas)
+        .args(["-X", "utf8", "-u", "-m", "motor"])
+        .args(argumentos)
         .env("PYTHONIOENCODING", "utf-8")
-        .envs(pedido.entorno.iter().map(|(variable, valor)| (variable, valor)))
+        .envs(
+            pedido
+                .entorno
+                .iter()
+                .map(|(variable, valor)| (variable, valor)),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(guion) = &pedido.guion {
-        orden.arg("--guion").arg(guion);
-    }
-    if let Some(idioma) = &pedido.idioma {
-        orden.args(["--idioma", idioma]);
-    }
-    if let Some(marca) = &pedido.marca {
-        orden.args(["--marca", marca]);
-    }
-    if let Some(cerebro) = &pedido.cerebro {
-        orden.args(["--ia", cerebro]);
-    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         orden.creation_flags(SIN_VENTANA);
+    }
+    if parada.cancelada() {
+        return Err(FalloMotor::Cancelado);
     }
     let mut hijo: Child = orden
         .spawn()
         .map_err(|e| FalloMotor::Arrancar(python.clone(), e))?;
     parada.0.lock().expect("not poisoned").0 = Some(hijo.id());
     if parada.cancelada() {
-        // Stopped before it had started.
+        // Stopped while it was starting.
         parada.cancelar();
     }
 
@@ -299,21 +363,10 @@ pub fn analizar(
         let _ = err.read_to_string(&mut texto);
         texto
     });
-    let mut trabajo = None;
-    let mut sin_plan = None;
     let mut ultimas: Vec<String> = Vec::new();
     for linea in BufReader::new(hijo.stdout.take().expect("piped")).lines() {
         let Ok(linea) = linea else { break };
-        if let Some(avance) = leer_avance(&linea) {
-            avisar(avance);
-        } else if let Some(plan) = linea.strip_prefix("Plan: ") {
-            trabajo = Path::new(plan.trim())
-                .parent()
-                .and_then(Path::parent)
-                .map(PathBuf::from);
-        } else if let Some(resto) = linea.strip_prefix("Pedido listo: ") {
-            sin_plan = resto.split(" -> ").next().map(|p| PathBuf::from(p.trim()));
-        }
+        leer(&linea);
         ultimas.push(linea);
         if ultimas.len() > 20 {
             ultimas.remove(0);
@@ -321,23 +374,19 @@ pub fn analizar(
     }
     let estado = hijo.wait();
     parada.0.lock().expect("not poisoned").0 = None;
-    let _ = std::fs::remove_file(&reglas);
     let errores = errores.join().unwrap_or_default();
     if parada.cancelada() {
         return Err(FalloMotor::Cancelado);
     }
-    match (estado, trabajo, sin_plan) {
-        (Ok(s), Some(trabajo), _) if s.success() => Ok(trabajo),
-        (Ok(s), None, Some(pedido)) if s.success() => Err(FalloMotor::SinPlan(pedido)),
-        _ => {
-            let cola: Vec<&str> = errores.lines().rev().take(12).collect();
-            let mut texto: Vec<&str> = cola.into_iter().rev().collect();
-            if texto.is_empty() {
-                texto = ultimas.iter().map(String::as_str).collect();
-            }
-            Err(FalloMotor::Fallo(texto.join("\n")))
-        }
+    if estado.is_ok_and(|s| s.success()) {
+        return Ok(ultimas);
     }
+    let cola: Vec<&str> = errores.lines().rev().take(12).collect();
+    let mut texto: Vec<&str> = cola.into_iter().rev().collect();
+    if texto.is_empty() {
+        texto = ultimas.iter().map(String::as_str).collect();
+    }
+    Err(FalloMotor::Fallo(texto.join("\n")))
 }
 
 /// `[analisis  45%] IMG_8441.MOV: 12 palabras` as an [`Avance`].
@@ -405,7 +454,10 @@ mod tests {
         let traza = "Traceback (most recent call last):\n  File \"x.py\", line 60, in pasada\n    \
                      return list(segs), info\nRuntimeError: CUDA failed with error out of memory\n";
         let dicho = FalloMotor::Fallo(traza.into()).resumen();
-        assert!(dicho.starts_with("La tarjeta gráfica se quedó sin memoria"), "{dicho}");
+        assert!(
+            dicho.starts_with("La tarjeta gráfica se quedó sin memoria"),
+            "{dicho}"
+        );
         assert!(!dicho.contains("Traceback"));
 
         let otro = "Traceback...\nValueError: el plan no tiene tomas\n\n";
@@ -421,9 +473,11 @@ mod tests {
             FalloMotor::Fallo(String::new()).resumen(),
             "El motor se paró sin decir por qué."
         );
-        assert!(FalloMotor::Fallo("ModuleNotFoundError: No module named 'cv2'".into())
-            .resumen()
-            .contains("le falta una pieza de Python"));
+        assert!(
+            FalloMotor::Fallo("ModuleNotFoundError: No module named 'cv2'".into())
+                .resumen()
+                .contains("le falta una pieza de Python")
+        );
     }
 
     #[test]
