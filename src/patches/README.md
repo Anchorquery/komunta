@@ -59,6 +59,9 @@ slower everywhere else (#388). One change, marked `Concat:` in `build.rs`:
   more module, `ggml-vulkan.dll`, which ggml loads only where the driver's
   `vulkan-1.dll` and a graphics card are there; build-app.yml turns it on
   for the x86_64 Windows bundle, with the Vulkan SDK installed to build it.
+  On MSVC that build runs under Ninja: the Vulkan backend configures its
+  shader generator as a project of its own mid-build, and under the Visual
+  Studio generator that inner configure found no compiler.
 
 And the copy is smaller than the published crate: ggml's GPU backends that
 no build compiles (CANN, CUDA, Hexagon, HIP, MUSA, OpenCL, RPC, SYCL,

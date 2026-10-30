@@ -117,12 +117,7 @@ fn main() {
     // must be rebuilt.
     println!("cargo:rerun-if-env-changed=GGML_VULKAN");
     println!("cargo:rerun-if-env-changed=VULKAN_SDK");
-    let backend_dl = env::var("GGML_BACKEND_DL").is_ok_and(|value| {
-        matches!(
-            value.to_ascii_uppercase().as_str(),
-            "ON" | "1" | "TRUE" | "YES"
-        )
-    });
+    let backend_dl = env_on("GGML_BACKEND_DL");
 
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let whisper_root = out.join("whisper.cpp");
@@ -236,6 +231,21 @@ fn main() {
     // for outright; a duplicate /O2 under Ninja and clang-cl is harmless.
     if target.contains("msvc") {
         config.cflag("-O2").cxxflag("-O2");
+    }
+
+    // Komunta: ggml's Vulkan backend builds its shader generator as a
+    // CMake project of its own, configured in the middle of the build.
+    // Under the Visual Studio generator that inner configure runs inside
+    // MSBuild and, on the CI's Visual Studio 2022, finds no compiler at
+    // all. Under Ninja it inherits cl and the MSVC environment the cmake
+    // crate hands the build. Ninja also means the crate writes
+    // CMAKE_CXX_FLAGS itself, without the /EHsc CMake would have added.
+    // A generator the environment names (CMAKE_GENERATOR) is left alone.
+    if target.contains("msvc")
+        && env_on("GGML_VULKAN")
+        && env::var_os("CMAKE_GENERATOR").is_none()
+    {
+        config.generator("Ninja").cxxflag("-EHsc");
     }
 
     if cfg!(feature = "coreml") {
@@ -361,6 +371,16 @@ fn main() {
 
     // for whatever reason this file is generated during build and triggers cargo complaining
     _ = std::fs::remove_file("bindings/javascript/package.json");
+}
+
+// Concat: a CMake switch the environment turns on, spelt as CMake reads it.
+fn env_on(name: &str) -> bool {
+    env::var(name).is_ok_and(|value| {
+        matches!(
+            value.to_ascii_uppercase().as_str(),
+            "ON" | "1" | "TRUE" | "YES"
+        )
+    })
 }
 
 // Concat: the shared build's linking. Only whisper, ggml and ggml-base are
