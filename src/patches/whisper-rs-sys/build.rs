@@ -112,6 +112,11 @@ fn main() {
     // Watched, because a library built the other way would link wrong.
     println!("cargo:rerun-if-env-changed=GGML_BACKEND_DL");
     println!("cargo:rerun-if-env-changed=GGML_CPU_ALL_VARIANTS");
+    // Komunta: the Vulkan module is one more of those, chosen the same way
+    // (GGML_VULKAN=ON, forwarded below), and a cached build without it
+    // must be rebuilt.
+    println!("cargo:rerun-if-env-changed=GGML_VULKAN");
+    println!("cargo:rerun-if-env-changed=VULKAN_SDK");
     let backend_dl = env::var("GGML_BACKEND_DL").is_ok_and(|value| {
         matches!(
             value.to_ascii_uppercase().as_str(),

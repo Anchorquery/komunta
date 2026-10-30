@@ -93,6 +93,10 @@ env:
   ORT_INTEL_MAC_VERSION: 1.23.2
   # WiX for the Windows .msi, as a dotnet tool, pinned by version.
   WIX_VERSION: 6.0.2
+  # The Vulkan SDK whisper's Vulkan module is built against, on the
+  # targets whose matrix row says `vulkan`; its installer is pinned in
+  # scripts/ci/deps.lock (vulkan-sdk-win64), which names this version too.
+  VULKAN_VERSION: 1.4.341.1
   # Oldest macOS the bundles run on. Apple silicon Macs all run newer than
   # this; it is the Intel floor. scripts/ci/check-min-os.sh lists every
   # bundled library built for a newer one.
@@ -129,6 +133,7 @@ jobs:
             inno: x64compatible
             wix: x64
             ggml: variants
+            vulkan: true
           # No Windows on ARM until its program starts: v0.2.7-rc.4's
           # concat.exe died with an access violation on `--version` (#326).
           # Its row was platform windows, arch aarch64, os windows-11-arm,
@@ -176,6 +181,15 @@ jobs:
       GGML_FMA: ${{ matrix.ggml == 'haswell' && 'ON' || 'OFF' }}
       GGML_F16C: ${{ matrix.ggml == 'haswell' && 'ON' || 'OFF' }}
       GGML_BMI2: ${{ matrix.ggml == 'haswell' && 'ON' || 'OFF' }}
+      # Komunta: whisper on the graphics card too, through Vulkan, which
+      # every current Windows driver (NVIDIA, AMD, Intel) carries. With
+      # GGML_BACKEND_DL the backend is one more module, ggml-vulkan.dll,
+      # beside the CPU ones: concat.exe does not link it, and ggml loads it
+      # at the first transcription only where vulkan-1.dll and a card are
+      # there - elsewhere the CPU modules run as before. On the CPU whisper
+      # took five times the montage engine's CUDA run for the same clips;
+      # the montage analysis runs in the app only with a card under it.
+      GGML_VULKAN: ${{ matrix.vulkan && 'ON' || 'OFF' }}
     steps:
       # The ref release.yml names, which is its tag: without one a run
       # started by hand builds main and publishes it under the tag's name.
@@ -338,6 +352,26 @@ jobs:
       #
       # fetch.sh runs under Git's bash, named by its full path: a bare
       # `bash` from PowerShell can be WSL's.
+      # The Vulkan SDK, for whisper's Vulkan module: the headers, the
+      # loader's import library and glslc, which compiles ggml's shaders.
+      # The build needs it; the bundle does not. LunarG's installer, pinned
+      # in deps.lock, unattended into C:\VulkanSDK\<version>.
+      - name: Vulkan SDK (Windows)
+        if: matrix.platform == 'windows' && matrix.vulkan
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bash = "$env:ProgramFiles\Gitinash.exe"
+          & $bash scripts/ci/fetch.sh vulkan-sdk-win64 vulkansdk.exe
+          if ($LASTEXITCODE -ne 0) { throw "the Vulkan SDK download failed" }
+          $sdk = "C:\VulkanSDK\$env:VULKAN_VERSION"
+          Start-Process -Wait -FilePath .ulkansdk.exe -ArgumentList "--root", $sdk, "--accept-licenses", "--default-answer", "--confirm-command", "install"
+          if (-not (Test-Path "$sdk\Bin\glslc.exe")) { throw "the Vulkan SDK did not install to $sdk" }
+          Remove-Item vulkansdk.exe -ErrorAction SilentlyContinue
+          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
       - name: FFmpeg development libraries and LLVM (Windows)
         if: matrix.platform == 'windows'
         timeout-minutes: 15
@@ -953,6 +987,9 @@ jobs:
             Copy-Item "$($built.DirectoryName)\whisper.dll", "$($built.DirectoryName)\ggml*.dll" $dir
             foreach ($module in "x64", "sandybridge", "haswell") {
               if (-not (Test-Path "$dir\ggml-cpu-$module.dll")) { throw "ggml-cpu-$module.dll is missing from the build" }
+            }
+            if ("${{ matrix.vulkan }}" -eq "true" -and -not (Test-Path "$dir\ggml-vulkan.dll")) {
+              throw "ggml-vulkan.dll is missing from the build"
             }
           }
           Copy-Item LICENSE, THIRD_PARTY_NOTICES.md $dir

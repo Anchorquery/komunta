@@ -206,6 +206,9 @@ impl Oido {
     fn contexto(&mut self, ruta: &Path) -> Result<&WhisperContext, Error> {
         if !self.cargados.contains_key(ruta) {
             let mut parametros = WhisperContextParameters::default();
+            // On the graphics card when ggml has one (a Vulkan module beside
+            // the CPU ones); whisper-rs leaves it off unless built for one.
+            parametros.use_gpu(concat_speech::transcribe::gpu_backend().is_some());
             if let Some(model_preset) = alineacion(ruta) {
                 parametros.dtw_parameters(DtwParameters {
                     mode: DtwMode::ModelPreset { model_preset },
