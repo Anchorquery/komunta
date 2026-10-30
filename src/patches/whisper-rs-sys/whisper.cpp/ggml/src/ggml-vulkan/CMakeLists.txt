@@ -149,6 +149,11 @@ if (Vulkan_FOUND)
     ExternalProject_Add(
         vulkan-shaders-gen
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vulkan-shaders
+        # Komunta: built near the top of the build tree. Under Cargo's
+        # OUT_DIR the default, .../ggml/src/ggml-vulkan/vulkan-shaders-gen-
+        # prefix/src/vulkan-shaders-gen-build, put CMake's compiler checks
+        # past Windows' 260-character limit, and cl could not open its PDB.
+        BINARY_DIR ${CMAKE_BINARY_DIR}/vsg
         CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/$<CONFIG>
                    -DCMAKE_INSTALL_BINDIR=.
                    -DCMAKE_BUILD_TYPE=$<CONFIG>

@@ -67,7 +67,10 @@ And the copy is smaller than the published crate: ggml's GPU backends that
 no build compiles (CANN, CUDA, Hexagon, HIP, MUSA, OpenCL, RPC, SYCL,
 WebGPU, zDNN, ZenDNN) are left out of `whisper.cpp/ggml/src`, so the
 crate's `cuda`, `hipblas` and `intel-sycl` features no longer build;
-Vulkan's folder is the published one, untouched. CMake only enters a backend's folder
+Vulkan's folder is the published one but for one line, marked `Komunta:`
+in its CMakeLists.txt: the shader generator is built in a short folder,
+since the default one put its compiler checks past Windows' 260-character
+path limit. CMake only enters a backend's folder
 when that backend is turned on. `Cargo.lock` and the crate's registry
 metadata files are left out too. Nothing else differs from the published
 crate.

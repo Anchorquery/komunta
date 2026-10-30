@@ -236,9 +236,9 @@ fn main() {
     // Komunta: ggml's Vulkan backend builds its shader generator as a
     // CMake project of its own, configured in the middle of the build.
     // Under the Visual Studio generator that inner configure runs inside
-    // MSBuild and, on the CI's Visual Studio 2022, finds no compiler at
-    // all. Under Ninja it inherits cl and the MSVC environment the cmake
-    // crate hands the build. Ninja also means the crate writes
+    // MSBuild and, on the CI's Visual Studio 2022, did not get as far as
+    // naming a compiler. Under Ninja it inherits cl and the MSVC
+    // environment the cmake crate hands the build. Ninja also means the crate writes
     // CMAKE_CXX_FLAGS itself, without the /EHsc CMake would have added.
     // A generator the environment names (CMAKE_GENERATOR) is left alone.
     if target.contains("msvc")
