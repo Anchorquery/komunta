@@ -55,12 +55,16 @@ slower everywhere else (#388). One change, marked `Concat:` in `build.rs`:
   generation, and ggml loads the best one the CPU can run; concat-speech's
   `cpu_backend` tells it where to look. build-app.yml turns both on for the
   x86_64 Windows and Linux bundles. Unset, the build is the published one.
+- Komunta: `GGML_VULKAN=ON` beside it adds ggml's Vulkan backend as one
+  more module, `ggml-vulkan.dll`, which ggml loads only where the driver's
+  `vulkan-1.dll` and a graphics card are there; build-app.yml turns it on
+  for the x86_64 Windows bundle, with the Vulkan SDK installed to build it.
 
 And the copy is smaller than the published crate: ggml's GPU backends that
-no build of Concat compiles (CANN, CUDA, Hexagon, HIP, MUSA, OpenCL, RPC,
-SYCL, Vulkan, WebGPU, zDNN, ZenDNN) are left out of
-`whisper.cpp/ggml/src`, so the crate's `cuda`, `hipblas`, `vulkan` and
-`intel-sycl` features no longer build. CMake only enters a backend's folder
+no build compiles (CANN, CUDA, Hexagon, HIP, MUSA, OpenCL, RPC, SYCL,
+WebGPU, zDNN, ZenDNN) are left out of `whisper.cpp/ggml/src`, so the
+crate's `cuda`, `hipblas` and `intel-sycl` features no longer build;
+Vulkan's folder is the published one, untouched. CMake only enters a backend's folder
 when that backend is turned on. `Cargo.lock` and the crate's registry
 metadata files are left out too. Nothing else differs from the published
 crate.
