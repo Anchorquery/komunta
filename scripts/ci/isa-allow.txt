@@ -78,6 +78,12 @@ ggml-base.dll                  16    0     0      0          0
 # ggml-base held none while whisper-rs-sys left it unoptimised; built at
 # /O2 it calls the same vectorized STL algorithms: 6 vpsravd.
 ggml.dll                       32    0     0      0          0
+# Komunta: ggml's Vulkan backend, loaded only where a graphics card and
+# its driver's vulkan-1.dll are there. Compiled with no /arch at all, so
+# the compiler emits none of this itself: its first build held 21 AVX2
+# instructions of the same vectorized STL (vpmovmskb, vpmaskmovd,
+# vpcmpeq*) and one zmm vdivps from MSVC's static, CPU-dispatched code.
+ggml-vulkan.dll                32    0     0      0          2
 whisper.dll                    48    0     0      0          0
 
 # Concat itself. It holds dispatched code of its own - memchr, aho-corasick
