@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use concat_core::{Frame, FrameRate, Rational};
-use concat_media::{DecodeOptions, Decoder, FrameSource, MediaInfo};
+use concat_media::{DecodeOptions, Decoder, FrameSource, MediaInfo, SeekableSource};
 use serde::{Deserialize, Serialize};
 
 use crate::caras::{BuscaCaras, LADO};
@@ -126,16 +126,24 @@ pub fn fotogramas(
     let info = concat_media::probe(ruta)?;
     let carpeta = trabajo.join("fotogramas");
     std::fs::create_dir_all(&carpeta)?;
+    let (ancho, alto) = a_lo_ancho(&info, ANCHO_FOTOGRAMA)?;
+    let mut pequenos = lector(ruta, ancho, alto)?;
+    let mut para_caras = detector
+        .as_ref()
+        .map(|_| {
+            let (ancho, alto) = encajar(&info, LADO as u32)?;
+            lector(ruta, ancho, alto)
+        })
+        .transpose()?;
     (0..cuantos)
         .map(|n| {
             let t = duracion * (n + 1) as f64 / (cuantos + 1) as f64;
             let nombre = format!("{id}_{n}.jpg");
-            let caras = match detector.as_deref_mut() {
-                Some(detector) => caras_en(detector, ruta, t, &info)?,
-                None => Vec::new(),
+            let caras = match (detector.as_deref_mut(), para_caras.as_mut()) {
+                (Some(detector), Some(lector)) => caras_en(detector, lector, t)?,
+                _ => Vec::new(),
             };
-            let (ancho, alto) = a_lo_ancho(&info, ANCHO_FOTOGRAMA)?;
-            let pequeno = uno(ruta, t, ancho, alto)?;
+            let pequeno = uno(&mut pequenos, t)?;
             std::fs::write(
                 carpeta.join(&nombre),
                 concat_media::jpeg(&pequeno, CALIDAD_JPEG)?,
@@ -149,31 +157,33 @@ pub fn fotogramas(
         .collect()
 }
 
-/// The faces in the frame at `t` seconds, looked for at the size the
-/// detector sees.
+/// The faces in the frame `lector` has at `t` seconds; it reads at the
+/// size the detector sees.
 fn caras_en(
     detector: &mut dyn BuscaCaras,
-    ruta: &Path,
+    lector: &mut Decoder,
     t: f64,
-    info: &MediaInfo,
 ) -> Result<Vec<Cara>, ErrorMirada> {
-    let (ancho, alto) = encajar(info, LADO as u32)?;
-    let fotograma = uno(ruta, t, ancho, alto)?;
+    let fotograma = uno(lector, t)?;
+    let (ancho, alto) = (lector.width() as usize, lector.height() as usize);
     detector
-        .caras(fotograma.pixels(), ancho as usize, alto as usize)
+        .caras(fotograma.pixels(), ancho, alto)
         .map_err(ErrorMirada::Caras)
 }
 
-/// The frame at `t` seconds, at `ancho` × `alto`.
-fn uno(ruta: &Path, t: f64, ancho: u32, alto: u32) -> Result<Frame, ErrorMirada> {
-    let desde = Rational::new((t * 1000.0).round() as i64, 1000);
-    let opciones = DecodeOptions::default()
-        .starting_at(desde)
-        .limited_to(1)
-        .scaled_to(ancho, alto);
-    Decoder::open(ruta, &opciones)?
-        .next_frame()?
-        .ok_or(ErrorMirada::SinImagen)
+/// A reader of the clip's frames at `ancho` × `alto`: one per clip and
+/// size, since a frame costs less to seek to than a decoder to open.
+fn lector(ruta: &Path, ancho: u32, alto: u32) -> Result<Decoder, ErrorMirada> {
+    Ok(Decoder::open(
+        ruta,
+        &DecodeOptions::default().scaled_to(ancho, alto),
+    )?)
+}
+
+/// The frame at `t` seconds.
+fn uno(lector: &mut Decoder, t: f64) -> Result<Frame, ErrorMirada> {
+    lector.seek(Rational::new((t * 1000.0).round() as i64, 1000))?;
+    lector.next_frame()?.ok_or(ErrorMirada::SinImagen)
 }
 
 /// The picture's size with its longer side at `lado`, even.

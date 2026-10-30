@@ -32,7 +32,7 @@ pub mod transcripcion;
 pub mod visual;
 pub mod voz;
 
-pub use idioma::{Idioma, Segunda, Tramo};
+pub use idioma::{Idioma, Reparto, Tramo};
 pub use musica::Ritmo;
 pub use palabras::{Palabra, PalabraOida};
 pub use ruido::Ruido;

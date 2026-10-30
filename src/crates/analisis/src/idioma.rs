@@ -2,8 +2,8 @@
 //!
 //! Whisper's own guess is good for long Spanish takes and poor for short
 //! Basque ones: "Pausoz pauso" comes back as Spanish, unsure. So a Basque
-//! guess is redone with the Basque model, an unsure Spanish one is heard
-//! by both models, and the transcription its model trusts more wins.
+//! guess goes to the Basque model, an unsure Spanish one is heard by both
+//! models, and the transcription its model trusts more wins.
 
 /// A clip's language, as whisper names it ("es", "eu", ...).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,16 +49,16 @@ impl From<&str> for Idioma {
     }
 }
 
-/// What to do after whisper's first pass, which guessed the language.
+/// Which models hear a clip, given whisper's guess at its language.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Segunda {
-    /// The first pass stands.
-    Ninguna,
-    /// Heard as Basque: hear it again with the Basque model, and keep that.
+pub enum Reparto {
+    /// The model that guessed, and that is that.
+    Adivinador,
+    /// Guessed Basque: the Basque model, alone.
     Euskera,
-    /// Heard as Spanish, unsure: hear it with the Basque model too, and keep
-    /// whichever its model trusts more ([`gana_la_segunda`]).
-    Contrastar,
+    /// Guessed Spanish, unsure: both, keeping whichever its model trusts
+    /// more ([`gana_la_segunda`]).
+    Ambos,
 }
 
 /// The language of a clip from whisper's guess over all of them: Spanish
@@ -76,16 +76,16 @@ pub fn entre_los_dos(castellano: f64, euskera: f64) -> (Idioma, f64) {
     }
 }
 
-/// The second pass a first one calls for. None when the language was
-/// given, or when one model serves both languages.
-pub fn segunda_pasada(adivinado: &Idioma, probabilidad: f64, dado: bool, un_solo_modelo: bool) -> Segunda {
-    if dado || un_solo_modelo {
-        return Segunda::Ninguna;
+/// Who hears a clip whose language whisper guessed. With one model serving
+/// both languages, there is nothing to choose.
+pub fn reparto(adivinado: &Idioma, probabilidad: f64, un_solo_modelo: bool) -> Reparto {
+    if un_solo_modelo {
+        return Reparto::Adivinador;
     }
     match adivinado.codigo() {
-        "eu" => Segunda::Euskera,
-        "es" if probabilidad < DUDA => Segunda::Contrastar,
-        _ => Segunda::Ninguna,
+        "eu" => Reparto::Euskera,
+        "es" if probabilidad < DUDA => Reparto::Ambos,
+        _ => Reparto::Adivinador,
     }
 }
 
@@ -128,21 +128,21 @@ mod tests {
     }
 
     #[test]
-    fn a_basque_guess_is_heard_again_in_basque() {
-        assert_eq!(segunda_pasada(&Idioma::euskera(), 0.99, false, false), Segunda::Euskera);
+    fn a_basque_guess_goes_to_the_basque_model() {
+        assert_eq!(reparto(&Idioma::euskera(), 0.99, false), Reparto::Euskera);
     }
 
     #[test]
     fn an_unsure_spanish_guess_is_checked_against_basque() {
-        assert_eq!(segunda_pasada(&Idioma::castellano(), 0.6, false, false), Segunda::Contrastar);
-        assert_eq!(segunda_pasada(&Idioma::castellano(), 0.95, false, false), Segunda::Ninguna);
-        assert_eq!(segunda_pasada(&Idioma::from("fr"), 0.3, false, false), Segunda::Ninguna);
+        assert_eq!(reparto(&Idioma::castellano(), 0.6, false), Reparto::Ambos);
+        assert_eq!(reparto(&Idioma::castellano(), 0.95, false), Reparto::Adivinador);
+        assert_eq!(reparto(&Idioma::from("fr"), 0.3, false), Reparto::Adivinador);
     }
 
     #[test]
-    fn no_second_pass_when_given_or_with_one_model() {
-        assert_eq!(segunda_pasada(&Idioma::euskera(), 0.5, true, false), Segunda::Ninguna);
-        assert_eq!(segunda_pasada(&Idioma::castellano(), 0.5, false, true), Segunda::Ninguna);
+    fn one_model_serves_whatever_the_guess() {
+        assert_eq!(reparto(&Idioma::euskera(), 0.5, true), Reparto::Adivinador);
+        assert_eq!(reparto(&Idioma::castellano(), 0.5, true), Reparto::Adivinador);
     }
 
     #[test]

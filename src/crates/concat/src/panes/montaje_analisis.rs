@@ -3,10 +3,9 @@
 //! into the job's `analisis.json`. What is not done here the engine does
 //! after, as it always did: it only analyses the clips the file lacks.
 //!
-//! Only with a graphics card under whisper. On the processor whisper.cpp
-//! encodes each clip three or four times (the language, the words, the
-//! Basque contrast) and took five times the engine's CTranslate2 on CUDA
-//! for the same five clips - slower than the engine on the processor too.
+//! Only with a graphics card under whisper: on the processor whisper.cpp
+//! took nine minutes over five clips the card hears in seconds, slower than
+//! the engine on the processor too.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;

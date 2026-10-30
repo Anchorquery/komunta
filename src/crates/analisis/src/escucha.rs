@@ -14,7 +14,7 @@ use whisper_rs::{
     WhisperVadContextParams, WhisperVadParams,
 };
 
-use crate::idioma::{self, Segunda};
+use crate::idioma::{self, Reparto};
 use crate::recorte::{self, Mapa};
 use crate::tokens::{self, TokenOido};
 use crate::{Idioma, Tramo, Transcripcion};
@@ -25,6 +25,12 @@ const PAUSA_VOZ_MS: i32 = 300;
 /// Only pauses this long are cut out of what whisper hears: shorter ones
 /// are part of how somebody talks.
 const PAUSA_RECORTE_MS: i32 = 2000;
+
+/// One thread for the voice detector. Silero is small, and ggml's threads
+/// spin at every step of it, so more only get in each other's way: on five
+/// clips one took 0.3 s against eight's 2 s, and with the processor busy
+/// eight had not got through five seconds of sound in two minutes.
+const HILOS_VOZ: i32 = 1;
 
 /// Why listening failed.
 #[derive(Debug, thiserror::Error)]
@@ -80,26 +86,38 @@ pub struct Oido {
     parada: Arc<AtomicBool>,
 }
 
+/// A model ready to hear a pass: its own working state, its opening line
+/// and the token from which on tokens are special.
+struct Oyente {
+    estado: WhisperState,
+    prompt: Option<String>,
+    fin: WhisperTokenId,
+}
+
 /// One run of whisper over a clip's speech, in one language.
 struct Pasada {
     idioma: Idioma,
     probabilidad: f64,
     segmentos: Vec<Vec<TokenOido>>,
-    /// From the speech whisper heard back to the clip.
-    mapa: Mapa,
 }
 
 impl Pasada {
+    /// A clip with no speech: nothing heard, and nothing sure of.
+    fn muda(idioma: Idioma) -> Self {
+        Self { idioma, probabilidad: 0.0, segmentos: Vec::new() }
+    }
+
     fn tramos(&self) -> Vec<Tramo> {
         self.segmentos.iter().map(|segmento| tokens::tramo(segmento)).collect()
     }
 
-    fn transcripcion(&self) -> Transcripcion {
+    /// What was heard, with `mapa` taking the speech back to the clip.
+    fn transcripcion(&self, mapa: &Mapa) -> Transcripcion {
         let oidas = self
             .segmentos
             .iter()
             .flat_map(|segmento| tokens::palabras_de(segmento))
-            .map(|palabra| self.mapa.devolver(palabra));
+            .map(|palabra| mapa.devolver(palabra));
         Transcripcion::nueva(oidas, &self.idioma, self.probabilidad)
     }
 }
@@ -132,7 +150,7 @@ impl Oido {
     fn tramos_de_voz(&mut self, audio: &[f32], pausa_ms: i32) -> Result<Vec<(f64, f64)>, Error> {
         let detector = match &mut self.detector {
             Some(detector) => detector,
-            None => self.detector.insert(cargar_detector(&self.modelos.voz, self.hilos)?),
+            None => self.detector.insert(cargar_detector(&self.modelos.voz)?),
         };
         let segmentos = detector.segments_from_samples(deteccion(pausa_ms), audio)?;
         Ok(segmentos
@@ -141,66 +159,75 @@ impl Oido {
     }
 
     /// What is said in `audio` (16 kHz mono). With no `idioma`, whisper
-    /// guesses it, and a guess of Basque, or an unsure Spanish one, gets a
-    /// second pass with the Basque model ([`crate::idioma`]).
+    /// guesses it, and the guess says which models hear it
+    /// ([`crate::idioma`]).
     pub fn transcribir(&mut self, audio: &[f32], idioma: Option<&Idioma>) -> Result<Transcripcion, Error> {
-        let primera = self.pasada(audio, idioma)?;
-        let un_solo_modelo = self.modelos.castellano == self.modelos.euskera;
-        let segunda = idioma::segunda_pasada(&primera.idioma, primera.probabilidad, idioma.is_some(), un_solo_modelo);
-        let elegida = match segunda {
-            Segunda::Ninguna => primera,
-            Segunda::Euskera => self.pasada(audio, Some(&Idioma::euskera()))?,
-            Segunda::Contrastar => {
-                let euskera = self.pasada(audio, Some(&Idioma::euskera()))?;
-                if idioma::gana_la_segunda(&primera.tramos(), &euskera.tramos()) {
-                    euskera
-                } else {
-                    primera
-                }
-            }
+        let voz = self.tramos_de_voz(audio, PAUSA_RECORTE_MS)?;
+        let (habla, mapa) = recorte::recortar(audio, &voz);
+        let pasada = match idioma {
+            _ if habla.is_empty() => Pasada::muda(idioma.cloned().unwrap_or_else(Idioma::castellano)),
+            Some(idioma) => self.en_idioma(&habla, idioma)?,
+            None => self.adivinando(&habla)?,
         };
-        Ok(elegida.transcripcion())
+        Ok(pasada.transcripcion(&mapa))
     }
 
-    /// One run over the clip's speech, in `idioma` or in the language
-    /// whisper guesses. A given language is sure; with no speech, nothing
-    /// is heard.
-    fn pasada(&mut self, audio: &[f32], idioma: Option<&Idioma>) -> Result<Pasada, Error> {
-        let euskera = idioma.is_some_and(|idioma| *idioma == Idioma::euskera());
+    /// Hears `habla` in a language known to be right, by that language's
+    /// model.
+    fn en_idioma(&mut self, habla: &[f32], idioma: &Idioma) -> Result<Pasada, Error> {
+        let oyente = self.oyente(*idioma == Idioma::euskera())?;
+        self.pasada(oyente, habla, idioma.clone(), 1.0)
+    }
+
+    /// Hears `habla` in the language whisper guesses, with the model the
+    /// guess calls for. The Spanish model guesses, and hears on the state
+    /// it guessed with unless the clip goes to the Basque one alone.
+    fn adivinando(&mut self, habla: &[f32]) -> Result<Pasada, Error> {
+        let mut oyente = self.oyente(false)?;
+        let (adivinado, probabilidad) = adivinar(&mut oyente.estado, habla, self.hilos)?;
+        let un_solo_modelo = self.modelos.castellano == self.modelos.euskera;
+        match idioma::reparto(&adivinado, probabilidad, un_solo_modelo) {
+            Reparto::Adivinador => self.pasada(oyente, habla, adivinado, probabilidad),
+            Reparto::Euskera => {
+                drop(oyente);
+                self.en_idioma(habla, &Idioma::euskera())
+            }
+            Reparto::Ambos => {
+                let primera = self.pasada(oyente, habla, adivinado, probabilidad)?;
+                let euskera = self.en_idioma(habla, &Idioma::euskera())?;
+                let gana_euskera = idioma::gana_la_segunda(&primera.tramos(), &euskera.tramos());
+                Ok(if gana_euskera { euskera } else { primera })
+            }
+        }
+    }
+
+    /// The Basque or the Spanish model, with its opening line, ready to hear.
+    fn oyente(&mut self, euskera: bool) -> Result<Oyente, Error> {
         let (ruta, prompt) = if euskera {
             (self.modelos.euskera.clone(), self.modelos.prompt_euskera.clone())
         } else {
             (self.modelos.castellano.clone(), self.modelos.prompt_castellano.clone())
         };
-        let voz = self.tramos_de_voz(audio, PAUSA_RECORTE_MS)?;
-        let (habla, mapa) = recorte::recortar(audio, &voz);
-        if habla.is_empty() {
-            let idioma = idioma.cloned().unwrap_or_else(Idioma::castellano);
-            return Ok(Pasada { idioma, probabilidad: 0.0, segmentos: Vec::new(), mapa });
-        }
-        let hilos = self.hilos;
-        let parada = Arc::clone(&self.parada);
         let contexto = self.contexto(&ruta)?;
-        let mut estado = contexto.create_state()?;
-        let (idioma, probabilidad) = match idioma {
-            Some(idioma) => (idioma.clone(), 1.0),
-            None => adivinar(&mut estado, &habla, hilos)?,
-        };
-        let mut parametros = parametros(idioma.codigo(), prompt.as_deref(), hilos);
+        Ok(Oyente { estado: contexto.create_state()?, prompt, fin: contexto.token_eot() })
+    }
+
+    /// One run over the clip's speech, in `idioma`.
+    fn pasada(&self, mut oyente: Oyente, habla: &[f32], idioma: Idioma, probabilidad: f64) -> Result<Pasada, Error> {
+        let mut parametros = parametros(idioma.codigo(), oyente.prompt.as_deref(), self.hilos);
         // SAFETY: `abort_when_set` reads the `AtomicBool` inside `parada`,
-        // which is held until `full` has returned.
+        // which `self` holds until `full` has returned.
         unsafe {
             parametros.set_abort_callback(Some(concat_speech::transcribe::abort_when_set));
-            parametros.set_abort_callback_user_data(Arc::as_ptr(&parada) as *mut std::ffi::c_void);
+            parametros.set_abort_callback_user_data(Arc::as_ptr(&self.parada) as *mut std::ffi::c_void);
         }
-        let oido = estado.full(parametros, &habla);
-        if parada.load(Ordering::Relaxed) {
+        let oido = oyente.estado.full(parametros, habla);
+        if self.parada.load(Ordering::Relaxed) {
             return Err(Error::Parado);
         }
         oido?;
-        let fin = contexto.token_eot();
-        let segmentos = estado.as_iter().map(|segmento| tokens_de(&segmento, fin)).collect();
-        Ok(Pasada { idioma, probabilidad, segmentos, mapa })
+        let segmentos = oyente.estado.as_iter().map(|segmento| tokens_de(&segmento, oyente.fin)).collect();
+        Ok(Pasada { idioma, probabilidad, segmentos })
     }
 
     fn contexto(&mut self, ruta: &Path) -> Result<&WhisperContext, Error> {
@@ -304,9 +331,9 @@ fn deteccion(pausa_ms: i32) -> WhisperVadParams {
     parametros
 }
 
-fn cargar_detector(ruta: &Path, hilos: usize) -> Result<WhisperVadContext, Error> {
+fn cargar_detector(ruta: &Path) -> Result<WhisperVadContext, Error> {
     let mut parametros = WhisperVadContextParams::new();
-    parametros.set_n_threads(hilos as i32);
+    parametros.set_n_threads(HILOS_VOZ);
     WhisperVadContext::new(&ruta.to_string_lossy(), parametros)
         .map_err(|error| Error::Modelo { ruta: ruta.to_owned(), motivo: error.to_string() })
 }
