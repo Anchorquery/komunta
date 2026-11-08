@@ -4139,6 +4139,7 @@ dependencies = [
  "analisis",
  "base64 0.22.1",
  "chrono",
+ "concat-media",
  "concat-project",
  "keyring",
  "log",

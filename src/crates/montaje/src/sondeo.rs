@@ -1,6 +1,7 @@
-//! What a media file is: length, picture size and sound. The app will ask
-//! its own probe; until then, and for the command line, `ffprobe` does it
-//! as the engine does.
+//! What a media file is: length, picture size and sound. Built with the
+//! `sonda` feature - as the app is - it asks the app's own libavformat
+//! (`concat_media::probe`), so nothing outside the app is needed. Without
+//! it, as the command line is built, `ffprobe` answers as the engine's did.
 
 use std::path::Path;
 use std::process::Command;
@@ -20,6 +21,40 @@ pub struct Sondeo {
     pub fps: f64,
     /// Whether it carries sound.
     pub audio: bool,
+}
+
+/// Probes a file with what this build has: the app's libavformat with
+/// `sonda`, `ffprobe` otherwise. None when there is nothing to play.
+pub fn sondear(ruta: &Path) -> Option<Sondeo> {
+    #[cfg(feature = "sonda")]
+    return libav(ruta);
+    #[cfg(not(feature = "sonda"))]
+    ffprobe(ruta)
+}
+
+/// Probes a file with the app's libavformat. None when it cannot be
+/// opened or holds neither picture nor sound.
+#[cfg(feature = "sonda")]
+pub fn libav(ruta: &Path) -> Option<Sondeo> {
+    let info = concat_media::probe(ruta).ok()?;
+    let duracion = info.duration.map_or(0.0, |d| d.as_f64());
+    let audio = info.audio.is_some();
+    let Some(video) = info.video else {
+        // Sound only: a length and nothing to show.
+        return audio.then_some(Sondeo {
+            duracion,
+            audio,
+            ..Sondeo::default()
+        });
+    };
+    Some(Sondeo {
+        duracion,
+        // Already turned a quarter where the stream says so.
+        ancho: video.width,
+        alto: video.height,
+        fps: video.frame_rate.fps().as_f64(),
+        audio,
+    })
 }
 
 /// Probes a file the way the engine's `sondear` does. None when there is
@@ -107,5 +142,11 @@ mod tests {
         assert_eq!((s.ancho, s.alto), (2160, 3840));
         assert!(s.audio);
         assert!((s.duracion - 5.032).abs() < 1e-9);
+    }
+
+    #[cfg(feature = "sonda")]
+    #[test]
+    fn a_file_that_is_not_there_has_nothing_to_play() {
+        assert_eq!(libav(Path::new("no-existe/clip.mp4")), None);
     }
 }

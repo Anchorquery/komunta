@@ -6,6 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 description = "Komunta: turns the montage engine's plan (plan.json, analisis.json, inventario.json) into an editable project."
 
+[features]
+# Media probed with the app's own libavformat instead of `ffprobe`. The app
+# turns it on; the command line and the tests stay without ffmpeg.
+sonda = ["dep:concat-media"]
+
 [dependencies]
 # The job's analysis and the AI's descriptions in it; Gemini, for planning.
 analisis = { path = "../analisis", default-features = false, features = ["gemini"] }
@@ -13,6 +18,7 @@ analisis = { path = "../analisis", default-features = false, features = ["gemini
 base64 = "0.22"
 # When a plan version was kept, and when Gemini's quota comes back.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+concat-media = { workspace = true, optional = true }
 concat-project.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true

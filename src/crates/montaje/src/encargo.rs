@@ -88,7 +88,7 @@ impl Encargo {
             fps: 30,
             kit,
             carpeta: proyecto.to_path_buf(),
-            sondear: sondeo::ffprobe,
+            sondear: sondeo::sondear,
         })
     }
 

@@ -101,7 +101,7 @@ fn ejecutar() -> Result<PathBuf, String> {
         fps: 30,
         kit,
         carpeta: salida.clone(),
-        sondear: sondeo::ffprobe,
+        sondear: sondeo::sondear,
     };
     let nombre = estado["nombre"]
         .as_str()
