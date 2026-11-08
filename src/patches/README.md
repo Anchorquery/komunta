@@ -62,6 +62,15 @@ slower everywhere else (#388). One change, marked `Concat:` in `build.rs`:
   On MSVC that build runs under Ninja: the Vulkan backend configures its
   shader generator as a project of its own mid-build, and under the Visual
   Studio generator that inner configure found no compiler.
+- Komunta: `whisper.cpp/src/whisper.cpp`, marked `Komunta:`, keeps in the
+  state what the encoder last ran on - the mel, the offset and the audio
+  context - and `whisper_full` does not encode a window again when that
+  output is already there. The montage's analysis detects a clip's
+  language on a state and then transcribes on that same state; on the
+  processor the encoder is most of a large model's time, and the second
+  encoding was some thirty seconds a clip. The build script watches
+  `whisper.cpp` and copies it over again when a file changes: the
+  published one copied it once, so a cached build never saw a change.
 
 And the copy is smaller than the published crate: ggml's GPU backends that
 no build compiles (CANN, CUDA, Hexagon, HIP, MUSA, OpenCL, RPC, SYCL,

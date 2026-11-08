@@ -920,6 +920,13 @@ struct whisper_state {
     // [EXPERIMENTAL] speed-up techniques
     int32_t exp_n_audio_ctx = 0; // 0 - use default
 
+    // Komunta: what the encoder's output was last computed from - the mel,
+    // the offset into it and the audio context - so that a full run over
+    // the audio the language was just detected on does not encode it again.
+    std::vector<float> encoded_mel;
+    int encoded_offset      = -1;
+    int encoded_n_audio_ctx = -1;
+
     whisper_vad_context * vad_context = nullptr;
 
     struct vad_segment_info {
@@ -2364,6 +2371,9 @@ static bool whisper_encode_internal(
                    void * abort_callback_data) {
     const int64_t t_start_us = ggml_time_us();
 
+    // Komunta: a failed or stopped run leaves no output to reuse.
+    wstate.encoded_offset = -1;
+
     // conv
     {
         auto & sched = wstate.sched_conv.sched;
@@ -2452,7 +2462,22 @@ static bool whisper_encode_internal(
     wstate.t_encode_us += ggml_time_us() - t_start_us;
     wstate.n_encode++;
 
-    return !(abort_callback && abort_callback(abort_callback_data));
+    const bool aborted = abort_callback && abort_callback(abort_callback_data);
+    if (!aborted) {
+        wstate.encoded_mel         = wstate.mel.data;
+        wstate.encoded_offset      = mel_offset;
+        wstate.encoded_n_audio_ctx = wstate.exp_n_audio_ctx;
+    }
+
+    return !aborted;
+}
+
+// Komunta: whether the encoder's output in `wstate` was computed from the
+// mel it holds now, from `mel_offset`, on the audio context asked for now.
+static bool whisper_encoded_already(const whisper_state & wstate, int mel_offset) {
+    return wstate.encoded_offset      == mel_offset &&
+           wstate.encoded_n_audio_ctx == wstate.exp_n_audio_ctx &&
+           wstate.encoded_mel         == wstate.mel.data;
 }
 
 static struct ggml_cgraph * whisper_build_graph_decoder(
@@ -7017,7 +7042,10 @@ int whisper_full_with_state(
         }
 
         // encode audio features starting at offset seek
-        if (!whisper_encode_internal(*ctx, *state, seek, params.n_threads, params.abort_callback, params.abort_callback_user_data)) {
+        // Komunta: unless they are already those the language was detected on.
+        if (whisper_encoded_already(*state, seek)) {
+            WHISPER_LOG_INFO("%s: reusing the encoder's output at seek %d\n", __func__, seek);
+        } else if (!whisper_encode_internal(*ctx, *state, seek, params.n_threads, params.abort_callback, params.abort_callback_user_data)) {
             WHISPER_LOG_ERROR("%s: failed to encode\n", __func__);
             return -6;
         }
