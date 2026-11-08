@@ -143,7 +143,7 @@ concat-project.workspace = true
 montaje = { path = "../montaje" }
 # The montage's analysis of the clips - whisper, the voice detector and
 # YuNet - run here before the engine.
-analisis = { path = "../analisis", features = ["escucha", "vision"] }
+analisis = { path = "../analisis", features = ["describir", "escucha", "vision"] }
 concat-export.workspace = true
 concat-host = { workspace = true, features = ["gpu"] }
 concat-speech = { workspace = true, features = ["chatterbox"] }

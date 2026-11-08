@@ -43,7 +43,7 @@ export struct MontajeData {
     wide: bool,
     square: bool,
     brand: int,
-    /// "Sin marca" first, then the engine's kits.
+    /// "Sin marca" first, then the brand kits.
     brands: [string],
     /// 0 detect, 1 Spanish, 2 Basque.
     language: int,
@@ -52,10 +52,10 @@ export struct MontajeData {
     captions: int,
     /// A script file outside the material; empty for none.
     script: string,
-    /// The engine is where Settings says.
-    engine-ok: bool,
-    /// What is wrong with it when it is not, or which AI will plan.
-    engine-note: string,
+    /// The whisper models the language asked for needs are downloaded.
+    models-ok: bool,
+    /// Which are missing, and where to get them, when they are not.
+    models-note: string,
     /// A montage is under way.
     busy: bool,
     error: string,
@@ -341,7 +341,7 @@ export component MontajeDialog inherits Modal {
 
     property <bool> narrow: root.width < 680px;
     property <bool> can-next: !root.data.busy && root.data.material != "";
-    property <bool> can-run: root.can-next && root.data.engine-ok;
+    property <bool> can-run: root.can-next && root.data.models-ok;
 
     open: root.data.open;
     title: root.data.redo ? I18n.t("montaje.redoTitle") : I18n.t("montaje.build");
@@ -522,9 +522,9 @@ export component MontajeDialog inherits Modal {
             }
         }
 
-        // The engine is not set up: say so where the button would be
+        // A whisper model is missing: say so where the button would be
         // pressed, with the way to Settings beside it.
-        if !root.data.engine-ok: VerticalLayout {
+        if !root.data.models-ok: VerticalLayout {
             padding-top: 12px;
 
             HorizontalLayout {
@@ -532,7 +532,7 @@ export component MontajeDialog inherits Modal {
 
                 Notice {
                     horizontal-stretch: 1;
-                    text: root.data.engine-note;
+                    text: root.data.models-note;
                 }
 
                 VerticalLayout {

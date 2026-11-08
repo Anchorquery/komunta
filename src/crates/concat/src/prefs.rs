@@ -125,15 +125,16 @@ pub struct Preferences {
     pub montaje: MontajePrefs,
 }
 
-/// Where Komunta's montage engine is and which AI does what with it.
+/// Which AI does what in Komunta's montage, and where the Python engine
+/// it replaced was.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct MontajePrefs {
-    /// The engine's folder. None is `KOMUNTA_MOTOR`, or the team's usual
+    /// The Python engine's folder, as an older Komunta set it: its kits
+    /// and cache are brought from there once, and its `.env` is still
+    /// looked in for keys. None is `KOMUNTA_MOTOR`, or the team's usual
     /// place under the home folder.
     pub motor: Option<String>,
-    /// The Python to run it with. None is the engine's own `.venv`.
-    pub python: Option<String>,
     /// Who plans, describes and hears, and with which models; the keys
     /// are in the system's credential store, not here.
     #[serde(flatten)]

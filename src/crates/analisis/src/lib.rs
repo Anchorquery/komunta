@@ -2,7 +2,9 @@
 //! word by word and in which language, how noisy the sound is, and
 //! what the picture shows: how sharp and still, and where the faces are.
 //!
-//! A port of the Python engine's `motor/analisis.py`, module by module.
+//! A port of the Python engine's `motor/analisis.py`, module by module,
+//! and of the ingest before it (`motor/ingesta.py`), which lists the
+//! material folder into the job's `inventario.json`.
 //! What it writes is the engine's `analisis.json`, field for field, so the
 //! montage (`crates/montaje`) and the engine's AI step read it unchanged
 //! while the rest of the engine is still being ported.
@@ -14,12 +16,21 @@
 
 #[cfg(feature = "escucha")]
 pub mod audio;
+pub mod cache;
 pub mod caras;
 #[cfg(feature = "escucha")]
 pub mod clip;
+pub mod descripcion;
+pub mod documento;
 #[cfg(feature = "escucha")]
 pub mod escucha;
+pub mod foto;
+pub mod hojas;
 pub mod idioma;
+pub mod ingesta;
+pub mod inventario;
+pub(crate) mod lienzo;
+pub mod material;
 #[cfg(feature = "imagen")]
 pub mod mirada;
 pub mod musica;
@@ -33,6 +44,7 @@ pub mod visual;
 pub mod voz;
 
 pub use idioma::{Idioma, Reparto, Tramo};
+pub use inventario::Inventario;
 pub use musica::Ritmo;
 pub use palabras::{Palabra, PalabraOida};
 pub use ruido::Ruido;

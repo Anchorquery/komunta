@@ -386,35 +386,15 @@ impl PlanCrudo {
         }
     }
 
-    /// Writes the plan back, keeping the one it replaces as a version in
-    /// `ia/versiones`, in the engine's own numbering.
+    /// Writes the plan back and keeps it as a version in `ia/versiones`,
+    /// in the engine's own numbering.
     pub fn guardar(&self, trabajo: &Path, nota: &str) -> Result<(), Error> {
-        let ia = trabajo.join("ia");
-        let ruta = ia.join("plan.json");
-        let dir = ia.join("versiones");
-        let escribir = |ruta: &Path, texto: &str| {
-            std::fs::write(ruta, texto).map_err(|e| Error::Escribir(ruta.into(), e))
-        };
-        std::fs::create_dir_all(&dir).map_err(|e| Error::Escribir(dir.clone(), e))?;
-        let indice = dir.join("versiones.json");
-        let mut lista: Vec<Value> = std::fs::read_to_string(&indice)
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
-        let n = lista
-            .iter()
-            .filter_map(|v| v["n"].as_u64())
-            .max()
-            .unwrap_or(0)
-            + 1;
+        let ruta = trabajo.join("ia").join("plan.json");
         let texto = serde_json::to_string_pretty(&self.0).expect("JSON always serialises");
-        escribir(&ruta, &texto)?;
-        escribir(&dir.join(format!("v{n}.json")), &texto)?;
-        lista.push(json!({"n": n, "origen": "komunta", "nota": nota, "cambios": []}));
-        escribir(
-            &indice,
-            &serde_json::to_string_pretty(&lista).expect("JSON always serialises"),
-        )
+        std::fs::write(&ruta, texto).map_err(|e| Error::Escribir(ruta.clone(), e))?;
+        crate::versiones::guardar(trabajo, "komunta", Some(nota), &[])
+            .map(|_| ())
+            .map_err(|e| Error::Escribir(trabajo.join("ia").join("versiones"), e))
     }
 }
 

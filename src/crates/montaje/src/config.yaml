@@ -1,0 +1,42 @@
+# Komunta's montage settings as they come. A `config.yaml` in the app's
+# montage folder goes over this one, and `ajustes.json` over both; the
+# choices made in Settings go over everything.
+
+ia:
+  # Who makes the montage plan:
+  #   With the team's session or subscription (no API key):
+  #     claude_code  `claude -p`        (sign in once: claude auth login)
+  #     codex        `codex exec`       (OpenAI Codex CLI: codex login)
+  #     gemini_cli   `gemini -p`        (Gemini CLI: sign in with Google when it opens)
+  #   By API (key kept in Settings, paid per use):
+  #     anthropic, openai, google
+  #   manual         leaves ia/pedido.md and waits for ia/plan.json
+  modo: claude_code
+  timeout_seg: 1200
+  # After laying out, hands the fixable warnings back to the AI and keeps the better version.
+  segunda_pasada: true
+  # When the chosen planner fails (quota, overloaded, offline...), these take over, in order.
+  # The API ones only with a key kept.
+  respaldo: [anthropic, openai]
+  claude_code: {modelo: opus}
+  codex: {}
+  gemini_cli: {}
+  anthropic: {modelo: claude-opus-5-5, esfuerzo: high}
+  openai: {modelo: gpt-5.5, razonamiento: high}
+  google:
+    modelo: gemini-flash-latest
+    # Each Gemini model has its own daily quota: when the chosen one runs out, these are used.
+    respaldo: [gemini-2.5-flash, gemini-flash-lite-latest]
+    # Requests a day per model on the free plan (Google corrects it when it says so); 0 = paid.
+    limite_diario: 20
+
+video:
+  # Opacity of the warm flare over the person (0 = none); a brand kit can set its own.
+  destello: 0.45
+
+descripcion:
+  # The AI looks at each clip (a low-resolution video) and describes it.
+  # auto = with Gemini when there is a Google key; ninguno = contact sheets only.
+  modo: auto
+  modelo: gemini-flash-latest
+  clips_por_peticion: 8

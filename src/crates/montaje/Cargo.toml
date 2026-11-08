@@ -7,6 +7,12 @@ license.workspace = true
 description = "Komunta: turns the montage engine's plan (plan.json, analisis.json, inventario.json) into an editable project."
 
 [dependencies]
+# The job's analysis and the AI's descriptions in it; Gemini, for planning.
+analisis = { path = "../analisis", default-features = false, features = ["gemini"] }
+# The contact sheets, sent to the planner.
+base64 = "0.22"
+# When a plan version was kept, and when Gemini's quota comes back.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 concat-project.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
@@ -19,7 +25,8 @@ ttf-parser = "0.25"
 tiny-skia = { version = "0.12", features = ["png-format"] }
 # Proving an AI provider's key: one GET for its list of models. Blocking,
 # like concat-speech's downloads: it runs on a thread of its own.
-ureq = "2"
+ureq = { version = "2", features = ["json"] }
+log = "0.4"
 
 # The providers' keys live in the system's credential store.
 [target.'cfg(windows)'.dependencies]

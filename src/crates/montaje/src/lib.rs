@@ -1,26 +1,34 @@
-//! Komunta's montage: the job folder the engine leaves (the inventory, the
-//! analysis and the AI's plan) turned into an editable project.
+//! Komunta's montage: a job folder (the inventory, the analysis and the
+//! AI's plan) turned into an editable project.
 //!
 //! [`linea`] works out the timeline in seconds, as the Python engine's
-//! `construir_linea` does; [`proyecto`] lays it out as clips on lanes, one
+//! `construir_linea` did; [`proyecto`] lays it out as clips on lanes, one
 //! timeline per frame. A [`receta`] says what kind of video it is and what
 //! happens to captions; a [`kit`] brings the client's look. The result is
 //! an ordinary project folder the editor opens, where every cut, caption
 //! and piece of B-roll can still be changed.
 
+pub mod ajustes;
+pub mod avance;
+pub mod datos;
+pub mod descripcion;
 pub mod encargo;
 pub mod entrada;
+pub mod estado;
 pub mod garabatos;
 pub mod guion;
 pub mod ia;
 pub mod kit;
 pub mod linea;
 pub mod llavero;
-pub mod motor;
+pub mod pedido;
+pub mod plan;
 pub mod proveedores;
 pub mod proyecto;
+pub mod python;
 pub mod receta;
 pub mod sondeo;
+pub mod versiones;
 
 use std::path::{Path, PathBuf};
 
@@ -32,7 +40,8 @@ pub use guion::{Guion, PlanCrudo};
 pub use ia::Ia;
 pub use kit::Kit;
 pub use linea::{Linea, construir_linea};
-pub use motor::{Motor, Pedido};
+pub use datos::Datos;
+pub use pedido::Pedido;
 pub use proveedores::Proveedor;
 pub use proyecto::{Formato, Opciones, construir_proyecto};
 pub use receta::Receta;

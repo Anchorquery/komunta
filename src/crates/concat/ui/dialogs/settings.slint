@@ -67,7 +67,7 @@ export struct ProveedorIaData {
     name: string,
     /// Komunta keeps a key for it.
     kept: bool,
-    /// The engine's own `.env` has one, which can be brought over.
+    /// The old Python engine's `.env` has one, which can be brought over.
     in-engine-env: bool,
     /// It has a key from anywhere.
     has-key: bool,
@@ -82,18 +82,12 @@ export struct ProveedorIaData {
     note: string,
 }
 
-/// Komunta's Settings › Montaje e IA: where the montage engine is, the
-/// Python it runs on, and which AI does what. Its own struct, published by
-/// `panes::montaje`, so the sheet's own data stays Concat's.
+/// Komunta's Settings › Montaje e IA: where the montage keeps its things,
+/// and which AI does what. Its own struct, published by `panes::montaje`,
+/// so the sheet's own data stays Concat's.
 export struct MontajeSettingsData {
-    /// The engine's folder, as Settings has it or where it usually is.
-    engine: string,
-    /// The folder holds the engine.
-    engine-ok: bool,
-    /// The Python set by hand; empty is the engine's own.
-    python: string,
-    /// "Se usa: C:\...\python.exe".
-    python-note: string,
+    /// The montage's folder: jobs, brand kits, cache and settings.
+    data-folder: string,
     brain: int,
     brains: [string],
     /// Who takes over when the planner fails: "none" first.
@@ -1696,53 +1690,33 @@ export component SettingsDialog inherits Modal {
                 }
             }
 
-            // Komunta's montage engine: where it is, what it runs on, and
-            // which AI plans. A desk's affair: the engine is a folder of
-            // Python on this computer.
+            // Komunta's montage: where it keeps its jobs, kits and cache,
+            // and which AI does what. A desk's affair.
             if root.data.tab == 8 && !root.phone: VerticalLayout {
                 DialogSection {
                     ruled: false;
                     first: true;
-                    title: I18n.t("montaje.engine");
-                    hint: I18n.t("montaje.engineHint");
+                    title: I18n.t("montaje.dataFolder");
+                    hint: I18n.t("montaje.dataFolderHint");
 
                     HorizontalLayout {
                         spacing: 8px;
 
-                        Field {
-                            value: root.montaje.engine;
-                            technical: true;
-                            edited(text) => { root.montaje-edited("engine", text); }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.montaje.data-folder;
+                            color: Theme.fg-muted;
+                            font-family: Theme.font-technical;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
                         }
 
                         Button {
                             horizontal-stretch: 0;
-                            label: I18n.t("start.choose");
+                            label: I18n.t("montaje.openFolder");
                             glyph: Glyph.folder;
-                            clicked => { root.montaje-action("browse-engine"); }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 8px;
-
-                        VerticalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 8px;
-                                height: 8px;
-                                border-radius: self.width / 2;
-                                background: root.montaje.engine-ok ? Theme.green : Theme.danger;
-                            }
-                        }
-
-                        Text {
-                            horizontal-stretch: 1;
-                            text: root.montaje.engine-ok ? I18n.t("montaje.engineReady") : I18n.t("montaje.engineAbsent");
-                            color: root.montaje.engine-ok ? Theme.fg-muted : Theme.danger;
-                            font-size: Theme.fs-sm;
-                            vertical-alignment: center;
-                            wrap: word-wrap;
+                            clicked => { root.montaje-action("data"); }
                         }
                     }
                 }
@@ -1968,27 +1942,6 @@ export component SettingsDialog inherits Modal {
                             label: I18n.t("montaje.openTranscriber");
                             clicked => { root.montaje-action("open-transcriber"); }
                         }
-                    }
-                }
-
-                DialogSection {
-                    ruled: false;
-                    title: "Python";
-                    hint: I18n.t("montaje.pythonHint");
-
-                    Field {
-                        value: root.montaje.python;
-                        placeholder: I18n.t("montaje.pythonPlaceholder");
-                        technical: true;
-                        edited(text) => { root.montaje-edited("python", text); }
-                    }
-
-                    Text {
-                        text: root.montaje.python-note;
-                        color: Theme.fg-dim;
-                        font-family: Theme.font-technical;
-                        font-size: Theme.fs-sm;
-                        wrap: word-wrap;
                     }
                 }
 

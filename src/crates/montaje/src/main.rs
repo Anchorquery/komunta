@@ -1,8 +1,7 @@
 //! `montaje <trabajo> <salida> [opciones]`
 //!
-//! Turns a job folder of the montage engine into a project folder Komunta
-//! opens. Until the montage screen exists, this is how a plan reaches the
-//! editor.
+//! Turns a montage job folder into a project folder Komunta opens, outside
+//! the app.
 //!
 //! Options:
 //!   --receta <id>            recipe (default: the job's template, or
@@ -11,14 +10,8 @@
 //!   --formatos <a,b>         frames, main first: vertical, 16x9, 1x1
 //!                            (default: the recipe's)
 //!   --marca <id>             brand kit (default: the job's)
-//!   --marcas <carpeta>       the engine's `marcas` folder (default: two
+//!   --marcas <carpeta>       the brand kits' folder (default: two
 //!                            folders above the job)
-//!
-//! `montaje nuevo <material> <proyecto> --motor <carpeta> [opciones]` does
-//! what the "Nuevo montaje" screen does: runs the engine on the material
-//! for the plan, then lays it out. Besides the options above it takes
-//! `--peticion <texto>`, `--guion <archivo>`, `--idioma es|eu` and
-//! `--ia <cerebro>`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -52,12 +45,6 @@ fn ejecutar() -> Result<PathBuf, String> {
         } else {
             posicionales.push(PathBuf::from(arg));
         }
-    }
-    if posicionales
-        .first()
-        .is_some_and(|p| p.as_os_str() == "nuevo")
-    {
-        return nuevo(&posicionales[1..], &opcion);
     }
     let [trabajo, salida] = posicionales.as_slice() else {
         return Err(USO.to_owned());
@@ -128,80 +115,4 @@ fn ejecutar() -> Result<PathBuf, String> {
     let (project, settings) =
         montar(trabajo, &nombre, &receta, &opciones).map_err(|e| e.to_string())?;
     escribir(salida, &settings, &project).map_err(|e| e.to_string())
-}
-
-/// `montaje nuevo`: the engine's analysis and plan, then the project.
-fn nuevo(
-    posicionales: &[PathBuf],
-    opcion: &std::collections::HashMap<String, String>,
-) -> Result<PathBuf, String> {
-    let [material, proyecto] = posicionales else {
-        return Err("uso: montaje nuevo <material> <proyecto> --motor <carpeta> [...]".into());
-    };
-    let motor = montaje::Motor {
-        carpeta: opcion
-            .get("motor")
-            .map(PathBuf::from)
-            .ok_or("falta --motor")?,
-        python: opcion.get("python").cloned().unwrap_or_default(),
-    };
-    if !motor.valido() {
-        return Err(format!("{} no tiene el motor", motor.carpeta.display()));
-    }
-    let id_receta = opcion
-        .get("receta")
-        .map_or("mensaje_a_camara", String::as_str);
-    let candidatas = receta::cargar(&opcion.get("recetas").map(PathBuf::from).unwrap_or_default());
-    let receta = if id_receta == receta::AUTOMATICA {
-        receta::automatica()
-    } else {
-        candidatas
-            .iter()
-            .find(|r| r.id == id_receta)
-            .cloned()
-            .ok_or(format!("no hay receta «{id_receta}»"))?
-    };
-    let nombre = proyecto
-        .file_name()
-        .map_or("montaje".into(), |n| n.to_string_lossy().into_owned());
-    let pedido = montaje::Pedido {
-        material: material.clone(),
-        id: montaje::motor::id_trabajo(&nombre, &montaje::motor::ahora()),
-        receta: receta.clone(),
-        peticion: opcion.get("peticion").cloned().unwrap_or_default(),
-        guion: opcion.get("guion").map(PathBuf::from),
-        idioma: opcion.get("idioma").cloned(),
-        marca: opcion.get("marca").cloned(),
-        cerebro: opcion.get("ia").cloned(),
-        candidatas,
-        // The keys kept by the app's Settings, so a run from here plans
-        // with the same accounts.
-        entorno: montaje::Ia::default().entorno(&montaje::llavero::LlaveroSistema),
-    };
-    let trabajo = montaje::motor::analizar(&motor, &pedido, &Default::default(), |a| {
-        eprintln!("[{} {:>3.0}%] {}", a.fase, a.fraccion * 100.0, a.mensaje);
-    })
-    .map_err(|e| e.to_string())?;
-    let receta = pedido.receta_final(&trabajo);
-    if pedido.receta.es_automatica() {
-        eprintln!("la IA eligió: {}", receta.nombre);
-    }
-    let formatos = match opcion.get("formatos") {
-        Some(lista) => lista.split(',').map(|f| f.trim().to_owned()).collect(),
-        None => std::iter::once(receta.formato.clone())
-            .chain(receta.formatos_extra.iter().cloned())
-            .collect(),
-    };
-    let mut encargo = montaje::Encargo {
-        trabajo,
-        motor: motor.carpeta.clone(),
-        receta,
-        marca: pedido.marca.clone(),
-        formatos,
-        version: 0,
-        material: pedido.material.clone(),
-        pedida: pedido.receta.id.clone(),
-        peticion: pedido.peticion.clone(),
-    };
-    encargo.crear(proyecto, &nombre).map_err(|e| e.to_string())
 }

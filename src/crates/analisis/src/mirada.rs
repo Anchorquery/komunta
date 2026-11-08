@@ -173,7 +173,7 @@ fn caras_en(
 
 /// A reader of the clip's frames at `ancho` × `alto`: one per clip and
 /// size, since a frame costs less to seek to than a decoder to open.
-fn lector(ruta: &Path, ancho: u32, alto: u32) -> Result<Decoder, ErrorMirada> {
+pub(crate) fn lector(ruta: &Path, ancho: u32, alto: u32) -> Result<Decoder, ErrorMirada> {
     Ok(Decoder::open(
         ruta,
         &DecodeOptions::default().scaled_to(ancho, alto),
@@ -181,7 +181,7 @@ fn lector(ruta: &Path, ancho: u32, alto: u32) -> Result<Decoder, ErrorMirada> {
 }
 
 /// The frame at `t` seconds.
-fn uno(lector: &mut Decoder, t: f64) -> Result<Frame, ErrorMirada> {
+pub(crate) fn uno(lector: &mut Decoder, t: f64) -> Result<Frame, ErrorMirada> {
     lector.seek(Rational::new((t * 1000.0).round() as i64, 1000))?;
     lector.next_frame()?.ok_or(ErrorMirada::SinImagen)
 }
@@ -203,7 +203,7 @@ fn a_lo_ancho(info: &MediaInfo, ancho: u32) -> Result<(u32, u32), ErrorMirada> {
     Ok((ancho, par(alto)))
 }
 
-fn par(valor: f64) -> u32 {
+pub(crate) fn par(valor: f64) -> u32 {
     ((valor / 2.0).round() as u32 * 2).max(2)
 }
 

@@ -3,12 +3,11 @@
 //! with a call to the provider - and model, who describes the clips, and
 //! the whisper models the analysis hears Spanish and Basque takes with.
 //!
-//! The engine's folder, Python and recipes stay with the montage pane;
-//! this is the part that grew past a couple of fields.
+//! The data folder and the recipes stay with the montage pane; this is
+//! the part that grew past a couple of fields.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::Path;
 
 use montaje::ia::{self, Ia};
 use montaje::llavero::{self, Llavero, LlaveroSistema};
@@ -25,10 +24,11 @@ use crate::ui::{MontajeSettingsData, ProveedorIaData};
 /// Settings' Transcriber page, where whisper models are downloaded.
 const TRANSCRIBER_PAGE: i32 = 2;
 
-/// The planner when it fails: by default the engine's, these.
+/// The planner when it fails: by default these, as the montage's
+/// settings come.
 const RESPALDO_DEL_MOTOR: [&str; 2] = ["anthropic", "openai"];
 
-/// Claude's effort when none is chosen: the engine's.
+/// Claude's effort when none is chosen, as the settings come.
 const ESFUERZO_DEL_MOTOR: &str = "high";
 
 /// Where a provider's key comes from, when it has one.
@@ -36,7 +36,7 @@ const ESFUERZO_DEL_MOTOR: &str = "high";
 enum Origen {
     /// Komunta's own, in the credential store.
     Llavero(String),
-    /// The engine's `.env`, where the old web settings put it.
+    /// The old Python engine's `.env`, where its web settings put it.
     EnvMotor(String),
     /// The system's environment.
     Sistema(String),
@@ -169,10 +169,11 @@ impl AjustesIa {
         Ok(())
     }
 
-    /// Moves the key the engine's `.env` holds into the credential store.
+    /// Moves the key the old engine's `.env` holds into the credential
+    /// store.
     fn importar(&mut self, proveedor: Proveedor, studio: &mut Studio) -> Result<(), String> {
-        let carpeta = crate::panes::montaje::motor(studio).carpeta;
-        let clave = clave_en_env(&carpeta.join(".env"), proveedor.variable())
+        let env_motor = crate::panes::montaje::env_viejo(studio);
+        let clave = llavero::en_env(&env_motor, proveedor.variable())
             .ok_or_else(|| t("montaje.keyNotInEnv"))?;
         LlaveroSistema.guardar(proveedor, &llavero::limpiar(&clave)?)?;
         self.origenes.replace(None);
@@ -203,8 +204,8 @@ impl AjustesIa {
         self.estados.entry(proveedor).or_default()
     }
 
-    /// Where `proveedor`'s key is: the credential store first, as the
-    /// engine sees it, then its `.env`, then the system.
+    /// Where `proveedor`'s key is: the credential store first, as a run
+    /// reads it, then the old engine's `.env`, then the system.
     fn origen(&self, proveedor: Proveedor, studio: &Studio) -> Option<Origen> {
         let mut origenes = self.origenes.borrow_mut();
         let origenes = origenes.get_or_insert_with(|| leer_origenes(studio));
@@ -350,7 +351,7 @@ impl AjustesIa {
 }
 
 /// The whisper models the page offers, by id, in the order it lists them:
-/// those that hear more than English and the engine knows too.
+/// those that hear more than English and the montage offers.
 fn whisper_ids(studio: &Studio) -> Vec<String> {
     whispers(studio).into_iter().map(|m| m.id).collect()
 }
@@ -361,7 +362,7 @@ fn whispers(studio: &Studio) -> Vec<concat_speech::transcribe::ModelStatus> {
             estado
                 .models
                 .into_iter()
-                .filter(|m| !m.english_only && ia::whisper_del_motor(&m.id).is_some())
+                .filter(|m| !m.english_only && ia::whisper_ofrecido(&m.id))
                 .collect()
         })
         .unwrap_or_default()
@@ -393,14 +394,14 @@ fn proveedor_de(campo: &str, prefijo: &str) -> Option<Proveedor> {
 
 /// Where every provider's key is now.
 fn leer_origenes(studio: &Studio) -> HashMap<Proveedor, Origen> {
-    let env_motor = crate::panes::montaje::motor(studio).carpeta.join(".env");
+    let env_motor = crate::panes::montaje::env_viejo(studio);
     Proveedor::TODOS
         .into_iter()
         .filter_map(|proveedor| {
             let origen = LlaveroSistema
                 .leer(proveedor)
                 .map(Origen::Llavero)
-                .or_else(|| clave_en_env(&env_motor, proveedor.variable()).map(Origen::EnvMotor))
+                .or_else(|| llavero::en_env(&env_motor, proveedor.variable()).map(Origen::EnvMotor))
                 .or_else(|| {
                     std::env::var(proveedor.variable())
                         .ok()
@@ -410,17 +411,6 @@ fn leer_origenes(studio: &Studio) -> HashMap<Proveedor, Origen> {
             Some((proveedor, origen))
         })
         .collect()
-}
-
-/// `variable`'s value in a `.env` file, read the way the engine reads it.
-fn clave_en_env(ruta: &Path, variable: &str) -> Option<String> {
-    let texto = std::fs::read_to_string(ruta).ok()?;
-    texto.lines().find_map(|linea| {
-        let (clave, valor) = linea.trim().split_once('=')?;
-        (clave.trim() == variable)
-            .then(|| valor.trim().trim_matches(['"', '\'']).to_owned())
-            .filter(|v| !v.is_empty())
-    })
 }
 
 fn describir_origen(origen: Option<&Origen>) -> String {
@@ -435,7 +425,7 @@ fn describir_origen(origen: Option<&Origen>) -> String {
 }
 
 /// An AI as the lists name it.
-pub(crate) fn nombre_cerebro(id: &str) -> String {
+fn nombre_cerebro(id: &str) -> String {
     t(&format!("montaje.brainName.{}", id.replace('_', "")))
 }
 
@@ -474,15 +464,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            clave_en_env(&ruta, "ANTHROPIC_API_KEY").as_deref(),
+            llavero::en_env(&ruta, "ANTHROPIC_API_KEY").as_deref(),
             Some("sk-ant-1234567890abcd")
         );
         assert_eq!(
-            clave_en_env(&ruta, "OPENAI_API_KEY"),
+            llavero::en_env(&ruta, "OPENAI_API_KEY"),
             None,
             "an empty value is no key"
         );
-        assert_eq!(clave_en_env(&ruta, "GEMINI_API_KEY"), None);
+        assert_eq!(llavero::en_env(&ruta, "GEMINI_API_KEY"), None);
         let _ = std::fs::remove_dir_all(&carpeta);
     }
 

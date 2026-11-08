@@ -198,15 +198,24 @@ dependencies = [
 name = "analisis"
 version = "0.2.8"
 dependencies = [
+ "ab_glyph",
+ "base64 0.22.1",
+ "chrono",
  "concat-core",
  "concat-media",
  "concat-speech",
  "concat-vision",
+ "image",
  "log",
+ "regex",
+ "roxmltree 0.21.1",
  "serde",
  "serde_json",
+ "sha1",
  "thiserror 2.0.20",
+ "ureq 2.12.1",
  "whisper-rs",
+ "zip",
 ]
 
 [[package]]
@@ -3404,6 +3413,7 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png 0.18.1",
@@ -4126,8 +4136,12 @@ dependencies = [
 name = "montaje"
 version = "0.2.8"
 dependencies = [
+ "analisis",
+ "base64 0.22.1",
+ "chrono",
  "concat-project",
  "keyring",
+ "log",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -7202,6 +7216,8 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]

@@ -1,6 +1,9 @@
 //! Where the AI providers' keys are kept: the system's own credential
 //! store (Windows' Credential Manager, the macOS keychain), never a file
-//! in the clear. Each run hands them to the engine in its environment.
+//! in the clear. A run reads them from there ([`claves`]); the old
+//! engine's `.env` is still looked in, until its keys are brought over.
+
+use std::path::Path;
 
 use crate::proveedores::Proveedor;
 
@@ -70,13 +73,37 @@ pub fn final_visible(clave: &str) -> String {
     caracteres[caracteres.len() - 4..].iter().collect()
 }
 
-/// The environment a run of the engine gets: each kept key under the
-/// variable the engine reads.
-pub fn entorno(llavero: &impl Llavero) -> Vec<(&'static str, String)> {
+/// The key for `proveedor`: the one kept, else the one in the engine's
+/// `.env` at `env_motor`, else the system's environment; for Google,
+/// `GOOGLE_API_KEY` after `GEMINI_API_KEY`.
+pub fn clave(proveedor: Proveedor, llavero: &impl Llavero, env_motor: &Path) -> Option<String> {
+    let buscar = |variable: &str| en_env(env_motor, variable).or_else(|| std::env::var(variable).ok());
+    let respaldo = || (proveedor == Proveedor::Google).then(|| buscar("GOOGLE_API_KEY")).flatten();
+    llavero
+        .leer(proveedor)
+        .or_else(|| buscar(proveedor.variable()))
+        .or_else(respaldo)
+        .filter(|clave| !clave.trim().is_empty())
+}
+
+/// Every provider's [`clave`], by its id: "anthropic", "openai", "google".
+pub fn claves(llavero: &impl Llavero, env_motor: &Path) -> std::collections::HashMap<String, String> {
     Proveedor::TODOS
         .into_iter()
-        .filter_map(|proveedor| Some((proveedor.variable(), llavero.leer(proveedor)?)))
+        .filter_map(|proveedor| Some((proveedor.id().to_owned(), clave(proveedor, llavero, env_motor)?)))
         .collect()
+}
+
+/// `variable`'s value in the `.env` file at `ruta`, read the way the engine
+/// reads it; None when it is not there or empty.
+pub fn en_env(ruta: &Path, variable: &str) -> Option<String> {
+    let texto = std::fs::read_to_string(ruta).ok()?;
+    texto.lines().find_map(|linea| {
+        let (clave, valor) = linea.trim().split_once('=')?;
+        (clave.trim() == variable)
+            .then(|| valor.trim().trim_matches(['"', '\'']).to_owned())
+            .filter(|v| !v.is_empty())
+    })
 }
 
 #[cfg(test)]
@@ -127,16 +154,19 @@ mod tests {
     }
 
     #[test]
-    fn the_engine_gets_each_kept_key_under_its_variable() {
+    fn a_key_kept_comes_before_the_one_in_the_engine_env() {
+        let env = std::env::temp_dir().join(format!("komunta-llavero-{}.env", std::process::id()));
+        std::fs::write(&env, "# claves
+OPENAI_API_KEY = \"sk-del-env\"
+GOOGLE_API_KEY='AIza-del-env'
+").unwrap();
         let llavero = LlaveroEnMemoria::default();
-        llavero
-            .guardar(Proveedor::Google, "AIzaSyExampleExample")
-            .unwrap();
-        assert_eq!(
-            entorno(&llavero),
-            [("GEMINI_API_KEY", "AIzaSyExampleExample".to_owned())]
-        );
-        llavero.borrar(Proveedor::Google).unwrap();
-        assert!(entorno(&llavero).is_empty());
+        llavero.guardar(Proveedor::OpenAi, "sk-guardada").unwrap();
+        assert_eq!(clave(Proveedor::OpenAi, &llavero, &env).as_deref(), Some("sk-guardada"));
+        llavero.borrar(Proveedor::OpenAi).unwrap();
+        assert_eq!(clave(Proveedor::OpenAi, &llavero, &env).as_deref(), Some("sk-del-env"));
+        assert_eq!(en_env(&env, "GOOGLE_API_KEY").as_deref(), Some("AIza-del-env"));
+        assert_eq!(en_env(&env, "ANTHROPIC_API_KEY"), None);
+        let _ = std::fs::remove_file(&env);
     }
 }

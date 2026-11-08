@@ -3,38 +3,41 @@
 
 //! Komunta's montage with AI, which any project can have rather than a
 //! kind of project: the "Armar montaje" wizard over the open project (from
-//! the title bar, File, or the Montaje pane), and the Settings page that
-//! says where the engine is.
+//! the title bar, File, or the Montaje pane), and its Settings page.
 //!
 //! The wizard's three steps are the material, what the video is for, and
-//! the captions and the script. Running it works on the open project: the
-//! Python engine reads, transcribes and asks the AI for the plan
-//! ([`montaje::motor`]) on a worker, the `montaje` crate lays the plan out,
-//! and the result joins the project as new timelines
-//! ([`crate::panes::guion::graft`]). Its progress
-//! comes back as [`MontajeMsg::Progress`] and shows in the Montaje pane.
+//! the captions and the script. Running it works on the open project, on a
+//! worker ([`crate::panes::montaje_corrida`]): the material is listed, its
+//! clips analysed and described, the AI asked for the plan and the
+//! `montaje` crate lays it out, and the result joins the project as new
+//! timelines ([`crate::panes::guion::graft`]). Its progress comes back as
+//! [`MontajeMsg::Progress`] and shows in the Montaje pane.
+//!
+//! What the montage keeps - jobs, kits, cache, settings - is in the app's
+//! data folder ([`datos`]); the Python engine's are brought from its folder
+//! the first time.
 
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 
-use concat_host::AppDirs;
 use concat_project::Project;
-use montaje::ia::Ia;
-use montaje::llavero::LlaveroSistema;
-use montaje::motor::{self, Avance, FalloMotor, Parada};
+use montaje::avance::{Avance, Parada};
+use montaje::pedido;
 use montaje::proveedores::Proveedor;
 use montaje::receta::{self, ModoSubtitulos, Receta};
-use montaje::{Encargo, Motor, Pedido};
+use montaje::{Datos, Encargo, Pedido};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
-use crate::panes::montaje_ajustes::{AjustesIa, nombre_cerebro};
+use crate::panes::montaje_ajustes::AjustesIa;
 use crate::panes::montaje_analisis;
+use crate::panes::montaje_corrida::Corrida;
 use crate::platform;
 use crate::studio::{Studio, home_folder};
 use crate::ui::{App, GuionPanel, MontajeData, MontajeSettingsData, PaneKind};
 
-/// The Settings page the engine's folder is set on.
+/// The montage's Settings page.
 pub const SETTINGS_PAGE: i32 = 8;
 
 /// Everything that can happen to the montage.
@@ -56,7 +59,7 @@ pub enum MontajeMsg {
     Chosen(String, PathBuf),
     /// Montage the open project as the sheet, or New project, has it.
     Run,
-    /// The engine reported a step.
+    /// The run reported a step.
     Progress(Avance),
     /// The plan is in; it is being laid out.
     Laying,
@@ -91,7 +94,7 @@ pub struct MontajePane {
     vertical: bool,
     wide: bool,
     square: bool,
-    /// The engine's kits; the sheet lists "no brand" before them.
+    /// The brand kits; the sheet lists "no brand" before them.
     brands: Vec<String>,
     /// 0 for no brand, otherwise one past the index into `brands`.
     brand: usize,
@@ -150,45 +153,44 @@ fn with_automatic(recipes: Vec<Receta>) -> Vec<Receta> {
         .collect()
 }
 
-/// The clips analysed here before the engine runs (see
-/// [`montaje_analisis`]): the engine lists them, this analyses them, and
-/// the engine then skips what is done. An engine too old to list them
-/// analyses everything itself. Err only for a stop, as an empty message.
-fn analizar_aqui(
-    engine: &Motor,
-    pedido: &Pedido,
-    dirs: &AppDirs,
-    ia: &Ia,
-    parada: &Parada,
-    avisar: impl FnMut(Avance),
-) -> Result<(), String> {
-    let trabajo = match motor::inventariar(engine, pedido, parada) {
-        Ok(trabajo) => trabajo,
-        Err(FalloMotor::Cancelado) => return Err(String::new()),
-        Err(error) => {
-            log::warn!(
-                "montaje: the engine did not list the clips, it analyses them itself: {error}"
-            );
-            return Ok(());
-        }
-    };
-    montaje_analisis::analizar(dirs, ia, pedido.idioma.as_deref(), &trabajo, parada, avisar)
-        .map_err(|_| String::new())
+/// The montage's folder in the app's data folder, with the Python
+/// engine's kits, cache and settings brought over the first time it is
+/// asked for.
+pub fn datos(studio: &Studio) -> Datos {
+    static TRAER: Once = Once::new();
+    let datos = Datos::en(&studio.host.dirs.data);
+    TRAER.call_once(|| match datos.traer_del_motor(&motor_viejo(studio)) {
+        Ok(true) => log::info!(
+            "montaje: the Python engine's kits and cache brought to {}",
+            datos.carpeta.display()
+        ),
+        Ok(false) => {}
+        Err(error) => log::warn!("montaje: the Python engine's things were not brought over: {error}"),
+    });
+    datos
 }
 
-/// The engine as Settings has it, or where it usually is.
-pub fn motor(studio: &Studio) -> Motor {
-    let prefs = &studio.prefs.montaje;
-    let carpeta = prefs
+/// The Python engine's folder, as Settings once had it or where it
+/// usually was: where its kits and cache are brought from, and its `.env`
+/// still looked in for keys.
+fn motor_viejo(studio: &Studio) -> PathBuf {
+    studio
+        .prefs
+        .montaje
         .motor
         .clone()
         .filter(|m| !m.trim().is_empty())
         .or_else(|| std::env::var("KOMUNTA_MOTOR").ok())
-        .unwrap_or_else(|| home_folder("Desktop/apps/automatizacion_videos"));
-    Motor {
-        carpeta: PathBuf::from(carpeta),
-        python: prefs.python.clone().unwrap_or_default(),
-    }
+        .map_or_else(
+            || PathBuf::from(home_folder("Desktop/apps/automatizacion_videos")),
+            PathBuf::from,
+        )
+}
+
+/// The old engine's `.env`, for the keys not brought into the credential
+/// store yet.
+pub fn env_viejo(studio: &Studio) -> PathBuf {
+    motor_viejo(studio).join(".env")
 }
 
 /// The team's own recipes live beside the app's settings.
@@ -237,11 +239,6 @@ impl MontajePane {
                 match field.as_str() {
                     "material" => self.set_material(path),
                     "script" => self.script = path,
-                    "engine" => {
-                        studio.prefs.montaje.motor = Some(path);
-                        studio.prefs.save(&studio.host.dirs);
-                        self.brands = motor(studio).marcas();
-                    }
                     _ => {}
                 }
             }
@@ -264,27 +261,16 @@ impl MontajePane {
                 self.message = t("montaje.layingOut");
             }
             MontajeMsg::Done(result) => self.done(result, studio),
-            MontajeMsg::SettingEdited(field, value) => {
-                let kept = Some(value.clone()).filter(|v| !v.trim().is_empty());
-                match field.as_str() {
-                    "engine" => studio.prefs.montaje.motor = kept,
-                    "python" => studio.prefs.montaje.python = kept,
-                    _ => return self.ajustes.editado(&field, value),
-                }
-                studio.prefs.save(&studio.host.dirs);
-            }
+            MontajeMsg::SettingEdited(field, value) => self.ajustes.editado(&field, value),
             MontajeMsg::SettingChoice(field, value) => self.ajustes.elegido(&field, value, studio),
             MontajeMsg::SettingAction(name) => match name.as_str() {
-                "browse-engine" => {
-                    let current = motor(studio).carpeta.to_string_lossy().into_owned();
-                    pick("engine", t("montaje.whereIsEngine"), current);
-                }
                 "recipes" => {
                     let folder = recipes_folder(studio);
-                    let _ = std::fs::create_dir_all(&folder);
-                    if let Err(error) = platform::reveal(&folder.to_string_lossy()) {
-                        studio.notify(&error, true);
-                    }
+                    reveal(studio, &folder);
+                }
+                "data" => {
+                    let folder = datos(studio).carpeta;
+                    reveal(studio, &folder);
                 }
                 _ => self.ajustes.accion(&name, studio),
             },
@@ -319,7 +305,7 @@ impl MontajePane {
         self.recipe = id
             .and_then(|id| self.recipes.iter().position(|r| r.id == id))
             .unwrap_or(0);
-        self.brands = motor(studio).marcas();
+        self.brands = datos(studio).marcas();
         self.brand = self.brand.min(self.brands.len());
     }
 
@@ -438,13 +424,28 @@ impl MontajePane {
         Ok(())
     }
 
-    /// Whether a montage could start: the material, and the engine.
+    /// Whether a montage could start: the material, and the whisper
+    /// models.
     fn ready(&self, studio: &Studio) -> Result<(), String> {
         self.check_material()?;
-        if !motor(studio).valido() {
-            return Err(t("montaje.engineMissing"));
+        self.models_missing(studio).map_or(Ok(()), Err)
+    }
+
+    /// What to say when a whisper model the language asked for needs is
+    /// not downloaded.
+    fn models_missing(&self, studio: &Studio) -> Option<String> {
+        let faltan =
+            montaje_analisis::faltan(&studio.host.dirs, &studio.prefs.montaje.ia, self.idioma());
+        (!faltan.is_empty()).then(|| tf("montaje.modelsMissing", &[&faltan.join(", ")]))
+    }
+
+    /// The language asked for: "es", "eu", or None to let whisper tell.
+    fn idioma(&self) -> Option<&'static str> {
+        match self.language {
+            1 => Some("es"),
+            2 => Some("eu"),
+            _ => None,
         }
-        Ok(())
     }
 
     /// The recipe asked for in the frames and captions asked for, the
@@ -510,7 +511,6 @@ impl MontajePane {
             self.error = error;
             return;
         }
-        let engine = motor(studio);
         let (recipe, candidatas, frames) = self.asked();
         let name = proyecto
             .file_name()
@@ -518,15 +518,11 @@ impl MontajePane {
             .unwrap_or_else(|| "montaje".to_owned());
         let pedido = Pedido {
             material: PathBuf::from(self.material.trim()),
-            id: motor::id_trabajo(&name, &motor::ahora()),
+            id: pedido::id_trabajo(&name, &pedido::ahora()),
             receta: recipe,
             peticion: self.request.clone(),
             guion: Some(PathBuf::from(self.script.trim())).filter(|p| !p.as_os_str().is_empty()),
-            idioma: match self.language {
-                1 => Some("es".to_owned()),
-                2 => Some("eu".to_owned()),
-                _ => None,
-            },
+            idioma: self.idioma().map(str::to_owned),
             marca: self
                 .brand
                 .checked_sub(1)
@@ -534,10 +530,7 @@ impl MontajePane {
                 .cloned(),
             cerebro: studio.prefs.montaje.ia.cerebro.clone(),
             candidatas,
-            entorno: studio.prefs.montaje.ia.entorno(&LlaveroSistema),
         };
-        // A redo is the next version of the project's montage.
-        let version = Encargo::leer(&proyecto).map_or(0, |e| e.version);
         log::info!("montaje: {} from {}", pedido.id, pedido.material.display());
         self.open = false;
         self.busy = true;
@@ -549,45 +542,28 @@ impl MontajePane {
         if !studio.dock.contains(PaneKind::Guion) {
             studio.dock.replace(PaneKind::Media, PaneKind::Guion);
         }
-        let parada = self.parada.clone();
-        let dirs = studio.host.dirs.clone();
-        let ia = studio.prefs.montaje.ia.clone();
+        let corrida = Corrida {
+            datos: datos(studio),
+            env_viejo: env_viejo(studio),
+            dirs: studio.host.dirs.clone(),
+            ia: studio.prefs.montaje.ia.clone(),
+            parada: self.parada.clone(),
+            // A redo is the next version of the project's montage.
+            version: Encargo::leer(&proyecto).map_or(0, |e| e.version),
+            proyecto,
+            formatos: frames,
+        };
         crate::host::spawn(
-            move || -> Result<(Encargo, Project), String> {
+            move || {
                 let avisar = |avance| {
                     crate::host::on_ui(move |studio, _, _| {
                         studio.handle(Msg::Montaje(MontajeMsg::Progress(avance)));
                     });
                 };
-                analizar_aqui(&engine, &pedido, &dirs, &ia, &parada, avisar)?;
-                let trabajo = motor::analizar(&engine, &pedido, &parada, avisar).map_err(
-                    |error| match error {
-                        FalloMotor::Cancelado => String::new(),
-                        error => {
-                            // The panel says the cause; the traceback is for the log.
-                            if let FalloMotor::Fallo(cola) = &error {
-                                log::warn!("montaje: the engine's last lines:\n{cola}");
-                            }
-                            error.resumen()
-                        }
-                    },
-                )?;
-                crate::host::on_ui(|studio, _, _| studio.handle(Msg::Montaje(MontajeMsg::Laying)));
-                let encargo = Encargo {
-                    receta: pedido.receta_final(&trabajo),
-                    trabajo,
-                    motor: engine.carpeta.clone(),
-                    marca: pedido.marca.clone(),
-                    formatos: frames,
-                    version,
-                    material: pedido.material.clone(),
-                    pedida: pedido.receta.id.clone(),
-                    peticion: pedido.peticion.clone(),
+                let listo = || {
+                    crate::host::on_ui(|studio, _, _| studio.handle(Msg::Montaje(MontajeMsg::Laying)));
                 };
-                let nuevo = encargo
-                    .preparar(&proyecto)
-                    .map_err(|error| error.to_string())?;
-                Ok((encargo, nuevo))
+                corrida.ejecutar(&pedido, avisar, listo)
             },
             |studio, _, _, result| studio.handle(Msg::Montaje(MontajeMsg::Done(result))),
         );
@@ -611,7 +587,7 @@ impl MontajePane {
             }
         };
         // The project the montage was for was closed while it ran: it is
-        // not put into another one. The job stays in the engine's folder.
+        // not put into another one. The job stays in the montage's folder.
         if running_in.is_none() || open_project(studio) != running_in {
             self.error = tf("montaje.projectClosed", &[&encargo.trabajo.display()]);
             studio.notify(&t("montaje.failed"), true);
@@ -635,15 +611,7 @@ impl MontajePane {
         if !self.open {
             return MontajeData::default();
         }
-        let engine = motor(studio);
-        let engine_ok = engine.valido();
-        let brain = studio
-            .prefs
-            .montaje
-            .ia
-            .cerebro
-            .as_deref()
-            .map_or_else(|| t("montaje.brainEngine"), nombre_cerebro);
+        let models_missing = self.models_missing(studio);
         let mut brands = vec![SharedString::from(t("montaje.noBrand"))];
         brands.extend(self.brands.iter().map(|b| SharedString::from(b.as_str())));
         MontajeData {
@@ -674,16 +642,8 @@ impl MontajePane {
             language: self.language,
             captions: self.captions,
             script: self.script.as_str().into(),
-            engine_ok,
-            engine_note: if engine_ok {
-                tf("montaje.engineAi", &[&brain])
-            } else {
-                tf(
-                    "montaje.engineNotFound",
-                    &[&engine.carpeta.to_string_lossy()],
-                )
-            }
-            .into(),
+            models_ok: models_missing.is_none(),
+            models_note: models_missing.unwrap_or_default().into(),
             busy: self.busy,
             error: self.error.as_str().into(),
         }
@@ -705,22 +665,21 @@ impl MontajePane {
         if !studio.settings.open || studio.settings.tab != SETTINGS_PAGE {
             return MontajeSettingsData::default();
         }
-        let engine = motor(studio);
-        let prefs = &studio.prefs.montaje;
         let mut data = MontajeSettingsData {
-            engine: engine.carpeta.to_string_lossy().as_ref().into(),
-            engine_ok: engine.valido(),
-            python: prefs.python.clone().unwrap_or_default().into(),
-            python_note: tf(
-                "montaje.pythonUsed",
-                &[&engine.interprete().to_string_lossy()],
-            )
-            .into(),
+            data_folder: datos(studio).carpeta.to_string_lossy().as_ref().into(),
             recipes: recipes_folder(studio).to_string_lossy().as_ref().into(),
             ..MontajeSettingsData::default()
         };
         self.ajustes.publicar(studio, &mut data);
         data
+    }
+}
+
+/// Shows `folder` in the system's file browser, made first if need be.
+fn reveal(studio: &mut Studio, folder: &Path) {
+    let _ = std::fs::create_dir_all(folder);
+    if let Err(error) = platform::reveal(&folder.to_string_lossy()) {
+        studio.notify(&error, true);
     }
 }
 
@@ -740,14 +699,15 @@ fn strings<'a>(items: impl Iterator<Item = &'a str>) -> ModelRc<SharedString> {
     ))
 }
 
-/// The engine's own file kinds: videos, photos, audio, documents.
+/// The file kinds the material is read for: videos, photos, audio,
+/// documents.
 const VIDEO: [&str; 5] = ["mov", "mp4", "m4v", "mkv", "avi"];
 const IMAGE: [&str; 5] = ["jpg", "jpeg", "png", "webp", "heic"];
 const AUDIO: [&str; 6] = ["mp3", "m4a", "wav", "aac", "ogg", "flac"];
 const DOCUMENT: [&str; 3] = ["docx", "txt", "md"];
 
 /// How many videos, photos, audio files and documents a folder holds,
-/// subfolders included, as the engine reads it.
+/// subfolders included, as the listing reads it.
 fn contar(folder: &Path) -> (usize, usize, usize, usize) {
     let mut cuenta = (0, 0, 0, 0);
     let mut pendientes = vec![(folder.to_path_buf(), 0)];

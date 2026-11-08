@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::kit::Kit;
-use crate::motor::Motor;
+use crate::datos::Datos;
 use crate::proyecto::{Formato, Opciones};
 use crate::receta::Receta;
 use crate::{Error, sondeo};
@@ -26,10 +26,12 @@ pub const ARCHIVO: &str = "montaje.json";
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Encargo {
-    /// The engine's job folder.
+    /// The job folder.
     pub trabajo: PathBuf,
-    /// The engine's folder, for its brand kits.
-    pub motor: PathBuf,
+    /// The montage's folder ([`Datos`]) the brand kits and settings came
+    /// from; for a project the Python engine made, that engine's folder.
+    #[serde(alias = "motor")]
+    pub datos: PathBuf,
     /// The recipe the job was made with.
     pub receta: Receta,
     /// Brand kit id; None is the neutral look.
@@ -65,13 +67,12 @@ impl Encargo {
     /// The layout options for this job, the project's folder holding the
     /// drawn marks.
     pub fn opciones(&self, proyecto: &Path) -> Result<Opciones, Error> {
-        let motor = Motor {
-            carpeta: self.motor.clone(),
-            python: String::new(),
+        let datos = Datos {
+            carpeta: self.datos.clone(),
         };
-        let marcas = motor.carpeta.join("marcas");
+        let marcas = datos.carpeta_marcas();
         let kit = match &self.marca {
-            Some(id) => Kit::cargar(&marcas, id, destello(&motor.carpeta))?,
+            Some(id) => Kit::cargar(&marcas, id, datos.destello())?,
             None => Kit::neutro(&marcas.join("_comun").join("fuentes")),
         };
         let mut formatos: Vec<Formato> = self
@@ -157,14 +158,6 @@ impl Encargo {
         };
         Ok(to_document(&settings, &destino))
     }
-}
-
-/// The engine's flare strength from its `config.yaml` (`video.destello`),
-/// or its default.
-fn destello(motor: &Path) -> f64 {
-    let texto = std::fs::read_to_string(motor.join("config.yaml")).unwrap_or_default();
-    let valor: serde_yaml::Value = serde_yaml::from_str(&texto).unwrap_or_default();
-    valor["video"]["destello"].as_f64().unwrap_or(0.45)
 }
 
 /// Adds `nuevo`'s timelines to `destino`, numbered `version`, with every
@@ -298,6 +291,13 @@ mod tests {
             sondear: |_| None,
         };
         crate::construir_proyecto(&trabajo, &linea, &opciones).unwrap()
+    }
+
+    #[test]
+    fn a_link_the_engine_wrote_still_reads() {
+        let encargo: Encargo = serde_json::from_str(r#"{"motor": "C:/motor", "version": 2}"#).unwrap();
+        assert_eq!(encargo.datos, PathBuf::from("C:/motor"));
+        assert_eq!(encargo.version, 2);
     }
 
     #[test]

@@ -1,76 +1,116 @@
-//! A montage's clips analysed here, before the engine runs: whisper and
-//! the voice detector from the app's models folder, YuNet for the faces,
-//! into the job's `analisis.json`. What is not done here the engine does
-//! after, as it always did: it only analyses the clips the file lacks.
+//! A montage's material listed and its clips analysed: the folder into
+//! the job's `inventario.json`, then whisper and the voice detector from
+//! the app's models folder, YuNet for the faces, into its `analisis.json`.
+//! Only the clips the file lacks are analysed, and a clip another job
+//! analysed comes from the cache.
 //!
-//! Only with a graphics card under whisper: on the processor whisper.cpp
-//! took nine minutes over five clips the card hears in seconds, slower than
-//! the engine on the processor too.
+//! Whisper hears on the graphics card when ggml has one, on the processor
+//! otherwise: there, with each clip encoded once for its language and its
+//! words (see `patches/README.md`), five clips take about as long as the
+//! Python engine's faster-whisper did.
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use analisis::Idioma;
+use analisis::cache::Cache;
 use analisis::caras::{BuscaCaras, Detector};
 use analisis::clip::Ajustes;
 use analisis::escucha::{self, Modelos, Oido};
 use analisis::trabajo::{self, Analista, ErrorTrabajo, FOTOGRAMAS_POR_CLIP};
+use analisis::{Idioma, Inventario, ingesta};
 use concat_host::AppDirs;
 use concat_speech::transcribe;
 use montaje::ia::Ia;
-use montaje::motor::{Avance, Parada};
+use montaje::avance::{Avance, Parada};
 
-/// The run was stopped.
-#[derive(Debug)]
-pub(crate) struct Cancelado;
+use crate::i18n::tf;
 
-/// Analyses the clips of the job in `trabajo` that its `analisis.json`
-/// lacks, in `idioma` ("es", "eu"; None lets whisper tell), telling
-/// `avisar` as each starts. Only a stop is an error: anything else is
-/// logged and left to the engine.
+/// Lists the folder `material`, and `guion` when the script is elsewhere,
+/// into the job folder `trabajo`, telling `avisar` how it starts and ends.
+pub(crate) fn inventariar(
+    material: &Path,
+    guion: Option<&Path>,
+    trabajo: &Path,
+    mut avisar: impl FnMut(Avance),
+) -> io::Result<Inventario> {
+    let paso = |fraccion: f64, mensaje: String| Avance {
+        fase: "ingesta".into(),
+        fraccion,
+        mensaje,
+    };
+    avisar(paso(0.0, "Leyendo la carpeta".into()));
+    let mut inventario = ingesta::inventariar(material, trabajo, &ingesta::sondear)?;
+    if let Some(guion) = guion {
+        ingesta::anadir_guion(&mut inventario, guion, trabajo)?;
+    }
+    avisar(paso(1.0, resumen(&inventario)));
+    Ok(inventario)
+}
+
+/// What was found, as the Python engine said it.
+fn resumen(inventario: &Inventario) -> String {
+    let mut dicho = format!(
+        "{} vídeos, {} imágenes, {} documentos",
+        inventario.videos.len(),
+        inventario.imagenes.len(),
+        inventario.documentos.len()
+    );
+    if !inventario.descartados.is_empty() {
+        dicho.push_str(&format!(" ({} descartados)", inventario.descartados.len()));
+    }
+    dicho
+}
+
+/// A job to analyse here.
+pub(crate) struct Trabajo {
+    /// Its folder, with the inventory in it.
+    pub carpeta: PathBuf,
+    /// "es", "eu"; None lets whisper tell.
+    pub idioma: Option<String>,
+    /// The clips other jobs analysed.
+    pub cache: PathBuf,
+    /// The chosen brand kit's music.
+    pub musica_kit: Option<PathBuf>,
+}
+
+/// Analyses the clips of `trabajo` that its `analisis.json` lacks, and its
+/// stills and sound files, telling `avisar` as each clip starts. A clip
+/// that fails is logged and left out; whisper that cannot start, or a
+/// stop, is an error - a stop an empty one.
 pub(crate) fn analizar(
     dirs: &AppDirs,
     ia: &Ia,
-    idioma: Option<&str>,
-    trabajo: &Path,
+    trabajo: &Trabajo,
     parada: &Parada,
     mut avisar: impl FnMut(Avance),
-) -> Result<(), Cancelado> {
-    match grafica() {
-        Ok(grafica) => log::info!("montaje: the clips are analysed here, whisper on {grafica}"),
-        Err(motivo) => {
-            log::info!("montaje: the engine analyses the clips: {motivo}");
-            return Ok(());
-        }
-    }
-    let modelos = match modelos(dirs, ia, idioma) {
-        Ok(modelos) => modelos,
-        Err(motivo) => {
-            log::info!("montaje: the engine analyses the clips: {motivo}");
-            return Ok(());
-        }
-    };
-    let mut oido = match Oido::new(modelos) {
-        Ok(oido) => oido,
-        Err(error) => {
-            log::warn!("montaje: whisper would not start, the engine analyses the clips: {error}");
-            return Ok(());
-        }
-    };
-    oido.parar_con(parada.bandera());
+) -> Result<(), String> {
+    let idioma = trabajo.idioma.as_deref();
+    let dispositivo = dispositivo().map_err(|motivo| tf("montaje.noWhisper", &[&motivo]))?;
+    log::info!("montaje: the clips are analysed with whisper on {dispositivo}");
+    let modelos = modelos(dirs, ia, idioma)?;
     let mut detector = Detector::new()
         .inspect_err(|error| log::warn!("montaje: the clips are analysed without faces: {error}"))
         .ok();
+    let ajustes = Ajustes {
+        idioma: idioma.map(Idioma::from),
+        ..Ajustes::default()
+    };
+    let cache = Cache::new(
+        trabajo.cache.clone(),
+        ajustes_de_cache(&modelos, &ajustes, idioma, detector.is_some()),
+    );
+    let mut oido = Oido::new(modelos).map_err(|error| tf("montaje.noWhisper", &[&error.to_string()]))?;
+    oido.parar_con(parada.bandera());
     let mut analista = Analista {
         oido: &mut oido,
         caras: detector.as_mut().map(|d| d as &mut dyn BuscaCaras),
-        ajustes: Ajustes {
-            idioma: idioma.map(Idioma::from),
-            ..Ajustes::default()
-        },
+        ajustes,
         fotogramas: FOTOGRAMAS_POR_CLIP,
+        cache: Some(&cache),
+        musica_kit: trabajo.musica_kit.clone(),
     };
-    let resultado = trabajo::analizar(trabajo, &mut analista, |avance| {
+    let resultado = trabajo::analizar(&trabajo.carpeta, &mut analista, |avance| {
         avisar(Avance {
             fase: "analisis".into(),
             fraccion: avance.n as f64 / avance.de as f64,
@@ -81,38 +121,73 @@ pub(crate) fn analizar(
     match resultado {
         Ok(resumen) => {
             log::info!(
-                "montaje: {} clips analysed here, {} left to the engine",
+                "montaje: {} clips analysed ({} seen in other jobs), {} failed: {:?}",
                 resumen.analizados,
-                resumen.fallidos.len()
+                resumen.de_cache,
+                resumen.fallidos.len(),
+                resumen.fallidos
             );
             Ok(())
         }
-        Err(ErrorTrabajo::Cancelado) => Err(Cancelado),
-        Err(error) => {
-            log::warn!("montaje: the analysis stopped, the engine finishes it: {error}");
-            Ok(())
-        }
+        Err(ErrorTrabajo::Cancelado) => Err(String::new()),
+        Err(error) => Err(tf("montaje.analysisFailed", &[&error.to_string()])),
     }
 }
 
-/// The graphics card whisper would run on, or why it would not.
-fn grafica() -> Result<String, String> {
-    transcribe::cpu_backend()?;
-    transcribe::gpu_backend().ok_or_else(|| {
-        "whisper has no graphics card here, and on the processor the engine is faster".into()
+/// What a cached clip depends on besides its file: the models, by file
+/// name, the prompts, the thresholds, the language asked for, and whether
+/// faces were looked for.
+fn ajustes_de_cache(
+    modelos: &Modelos,
+    ajustes: &Ajustes,
+    idioma: Option<&str>,
+    con_caras: bool,
+) -> serde_json::Value {
+    let nombre = |ruta: &Path| ruta.file_name().map(|n| n.to_string_lossy().into_owned());
+    serde_json::json!({
+        "modelo_es": nombre(&modelos.castellano),
+        "modelo_eu": nombre(&modelos.euskera),
+        "voz": nombre(&modelos.voz),
+        "prompt_es": modelos.prompt_castellano,
+        "prompt_eu": modelos.prompt_euskera,
+        "idioma": idioma,
+        "umbral_voz": ajustes.umbral_voz,
+        "limpiar": ajustes.limpiar,
+        "umbral_ruido_db": ajustes.umbral_ruido_db,
+        "fotogramas": FOTOGRAMAS_POR_CLIP,
+        "caras": con_caras,
     })
 }
 
-/// The model files for `idioma`, or why the analysis cannot run here.
-/// Spanish is always needed: it is the one that guesses the language.
-/// Basque is not, for a shoot known to be in Spanish.
+/// What whisper would run on - the graphics card, or else the processor -
+/// or why it cannot run.
+fn dispositivo() -> Result<String, String> {
+    let procesador = transcribe::cpu_backend()?;
+    Ok(transcribe::gpu_backend().unwrap_or(procesador))
+}
+
+/// The whisper models a montage in `idioma` needs, by id, that are not
+/// downloaded. Spanish is always needed: it is the one that guesses the
+/// language. Basque is not, for a shoot known to be in Spanish.
+pub(crate) fn faltan(dirs: &AppDirs, ia: &Ia, idioma: Option<&str>) -> Vec<String> {
+    let (es, eu) = ia.whisper();
+    let necesarios: &[&str] = if idioma == Some("es") { &[es] } else { &[es, eu] };
+    necesarios
+        .iter()
+        .filter(|id| descargado(dirs, id).is_err())
+        .map(|id| (*id).to_owned())
+        .collect()
+}
+
+/// The model files for `idioma`, or why the analysis cannot run.
 fn modelos(dirs: &AppDirs, ia: &Ia, idioma: Option<&str>) -> Result<Modelos, String> {
+    let faltan = faltan(dirs, ia, idioma);
+    if !faltan.is_empty() {
+        return Err(tf("montaje.modelsMissing", &[&faltan.join(", ")]));
+    }
     let (es, eu) = ia.whisper();
     let castellano = descargado(dirs, es)?;
-    let euskera = match idioma {
-        Some("es") => descargado(dirs, eu).unwrap_or_else(|_| castellano.clone()),
-        _ => descargado(dirs, eu)?,
-    };
+    let euskera = descargado(dirs, eu).unwrap_or_else(|_| castellano.clone());
     let voz = transcribe::voice_detector(dirs, &AtomicBool::new(false))?;
     Ok(Modelos {
         castellano,

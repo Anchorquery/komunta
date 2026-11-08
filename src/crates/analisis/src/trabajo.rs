@@ -1,6 +1,6 @@
-//! A job's clips analysed into its `analisis.json`: the videos the engine's
-//! ingest listed in `inventario.json` that the file does not hold yet, each
-//! heard ([`crate::clip::escuchar`]) and looked at
+//! A job's clips analysed into its `analisis.json`: the videos the ingest
+//! ([`crate::ingesta`]) listed in `inventario.json` that the file does not
+//! hold yet, each heard ([`crate::clip::escuchar`]) and looked at
 //! ([`crate::mirada::mirar`]). The file is written after every clip, so a
 //! stopped run resumes where it stopped; the engine reads it back and only
 //! analyses what is missing - a clip that failed here, say.
@@ -9,34 +9,17 @@ use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
 use serde_json::{Map, Value};
+
+use crate::inventario::Inventario;
+pub use crate::inventario::Video;
 
 /// The engine's `analisis.fotogramas_por_clip`.
 pub const FOTOGRAMAS_POR_CLIP: usize = 3;
 
-/// A video as the ingest lists it.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub struct Video {
-    /// Its name in the job, unique.
-    pub id: String,
-    /// The file.
-    pub ruta: PathBuf,
-    /// Seconds long.
-    pub duracion: f64,
-    /// It has a sound stream.
-    pub audio: bool,
-}
-
 /// The videos the ingest listed in `<trabajo>/inventario.json`.
 pub fn videos(trabajo: &Path) -> io::Result<Vec<Video>> {
-    #[derive(Deserialize)]
-    struct Inventario {
-        videos: Vec<Video>,
-    }
-    let texto = std::fs::read_to_string(trabajo.join("inventario.json"))?;
-    let inventario: Inventario = serde_json::from_str(&texto).map_err(io::Error::other)?;
-    Ok(inventario.videos)
+    Inventario::leer(trabajo).map(|inventario| inventario.videos)
 }
 
 /// A job's `analisis.json`, as far as it has got. Whatever else the engine
@@ -76,8 +59,7 @@ impl Archivo {
             .collect()
     }
 
-    /// Adds a clip's entry and writes the file - whole, through a
-    /// temporary one, so the engine never reads half of it.
+    /// Adds a clip's entry and writes the file.
     pub fn anadir(&mut self, clip: Value) -> io::Result<()> {
         let clips = self
             .datos
@@ -89,12 +71,54 @@ impl Archivo {
         if let Value::Array(clips) = clips {
             clips.push(clip);
         }
+        self.escribir()
+    }
+
+    /// Sets `clave` - `imagenes`, `audios` - to `valor` and writes the file.
+    pub fn poner(&mut self, clave: &str, valor: Value) -> io::Result<()> {
+        self.datos.insert(clave.to_owned(), valor);
+        self.escribir()
+    }
+
+    /// Writes the file whole, through a temporary one, so the engine never
+    /// reads half of it.
+    fn escribir(&self) -> io::Result<()> {
         let temporal = self.ruta.with_extension("json.tmp");
         std::fs::write(
             &temporal,
             serde_json::to_vec(&self.datos).map_err(io::Error::other)?,
         )?;
         std::fs::rename(&temporal, &self.ruta)
+    }
+
+    /// What the file holds.
+    pub fn datos(&self) -> &Map<String, Value> {
+        &self.datos
+    }
+
+    /// Sets the `descripcion` of each clip or still in `descripciones`, by
+    /// id, and writes the file once. Returns the clips' entries as they now
+    /// are, for the cache; an id the file does not hold is skipped.
+    pub fn describir(&mut self, descripciones: Vec<(String, Value)>) -> io::Result<Vec<Value>> {
+        let mut clips = Vec::new();
+        for (id, descripcion) in descripciones {
+            for clave in ["clips", "imagenes"] {
+                let entrada = self
+                    .datos
+                    .get_mut(clave)
+                    .and_then(Value::as_array_mut)
+                    .and_then(|lista| lista.iter_mut().find(|e| e.get("id").and_then(Value::as_str) == Some(&id)));
+                if let Some(entrada) = entrada {
+                    entrada["descripcion"] = descripcion.clone();
+                    if clave == "clips" {
+                        clips.push(entrada.clone());
+                    }
+                    break;
+                }
+            }
+        }
+        self.escribir()?;
+        Ok(clips)
     }
 
     fn clips(&self) -> &[Value] {
@@ -110,18 +134,23 @@ pub use analizar::{Analista, Avance, ErrorTrabajo, Resumen, analizar};
 
 #[cfg(all(feature = "escucha", feature = "imagen"))]
 mod analizar {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use serde::Serialize;
+    use serde_json::Value;
 
-    use super::{Archivo, Video, videos};
+    use super::{Archivo, Video};
+    use crate::cache::Cache;
     use crate::caras::BuscaCaras;
     use crate::clip::{self, Ajustes, Escucha};
     use crate::escucha::Oido;
+    use crate::inventario::Inventario;
+    use crate::material::{self, MUSICA_KIT, Sonido};
     use crate::mirada::{self, Mirada};
 
-    /// What a run uses: whisper, the face detector if there is one, and the
-    /// engine's settings.
+    /// What a run uses: whisper, the face detector if there is one, the
+    /// engine's settings, the clips other jobs analysed, and the brand
+    /// kit's music.
     pub struct Analista<'a> {
         /// whisper and the voice detector.
         pub oido: &'a mut Oido,
@@ -131,6 +160,11 @@ mod analizar {
         pub ajustes: Ajustes,
         /// Frames kept per clip.
         pub fotogramas: usize,
+        /// None analyses every clip afresh and keeps none.
+        pub cache: Option<&'a Cache>,
+        /// The music of the job's brand kit, analysed beside the job's
+        /// own sound files.
+        pub musica_kit: Option<PathBuf>,
     }
 
     /// Where a run is: about to analyse clip `n` (from 0) of `de`.
@@ -149,6 +183,8 @@ mod analizar {
     pub struct Resumen {
         /// The clips analysed and written.
         pub analizados: usize,
+        /// Of those, the ones another job had analysed.
+        pub de_cache: usize,
         /// The clips that could not be, with why; left for the engine.
         pub fallidos: Vec<(String, String)>,
     }
@@ -174,6 +210,8 @@ mod analizar {
     struct ClipAnalizado<'a> {
         id: &'a str,
         duracion: f64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        clave_cache: Option<String>,
         #[serde(flatten)]
         escucha: Escucha,
         #[serde(flatten)]
@@ -181,9 +219,10 @@ mod analizar {
     }
 
     /// Analyses the clips of the job in `trabajo` that its `analisis.json`
-    /// lacks, writing each as it is done. `seguir` hears before each clip
-    /// and stops the run by answering false. A clip that fails is skipped
-    /// and told in the [`Resumen`]: the engine analyses it after.
+    /// lacks, writing each as it is done, then its stills and sound files.
+    /// `seguir` hears before each clip and stops the run by answering
+    /// false. A clip that fails is skipped and told in the [`Resumen`]: the
+    /// engine analyses it after.
     pub fn analizar(
         trabajo: &Path,
         analista: &mut Analista,
@@ -193,9 +232,13 @@ mod analizar {
             let ruta = trabajo.join(nombre);
             move |error| ErrorTrabajo::Archivo { ruta, error }
         };
-        let videos = videos(trabajo).map_err(archivo_de("inventario.json"))?;
+        let inventario = Inventario::leer(trabajo).map_err(archivo_de("inventario.json"))?;
         let mut archivo = Archivo::abrir(trabajo).map_err(archivo_de("analisis.json"))?;
-        let pendientes: Vec<Video> = archivo.pendientes(&videos).into_iter().cloned().collect();
+        let pendientes: Vec<Video> = archivo
+            .pendientes(&inventario.videos)
+            .into_iter()
+            .cloned()
+            .collect();
         let mut resumen = Resumen::default();
         for (n, video) in pendientes.iter().enumerate() {
             let avance = Avance {
@@ -206,9 +249,32 @@ mod analizar {
             if !seguir(avance) {
                 return Err(ErrorTrabajo::Cancelado);
             }
-            match uno(analista, video, trabajo) {
+            let clave = analista.cache.and_then(|cache| {
+                cache
+                    .clave(&video.ruta)
+                    .inspect_err(|error| log::warn!("{}: not cached: {error}", video.id))
+                    .ok()
+            });
+            let visto = analista
+                .cache
+                .zip(clave.as_deref())
+                .and_then(|(cache, clave)| cache.leer(clave, &video.id, trabajo));
+            if let Some(clip) = visto {
+                archivo.anadir(clip).map_err(archivo_de("analisis.json"))?;
+                resumen.analizados += 1;
+                resumen.de_cache += 1;
+                continue;
+            }
+            match uno(analista, video, clave, trabajo) {
                 Ok(clip) => {
-                    archivo.anadir(clip).map_err(archivo_de("analisis.json"))?;
+                    archivo
+                        .anadir(clip.clone())
+                        .map_err(archivo_de("analisis.json"))?;
+                    if let Some(cache) = analista.cache
+                        && let Err(error) = cache.guardar(trabajo, &clip)
+                    {
+                        log::warn!("{}: not cached: {error}", video.id);
+                    }
                     resumen.analizados += 1;
                 }
                 Err(motivo) => {
@@ -217,15 +283,52 @@ mod analizar {
                 }
             }
         }
+        let imagenes = material::imagenes(
+            analista
+                .caras
+                .as_mut()
+                .map(|d| &mut **d as &mut dyn BuscaCaras),
+            &inventario.imagenes,
+        );
+        let sonidos = sonidos(&inventario, analista.musica_kit.as_deref());
+        let audios = material::audios(analista.oido, &sonidos);
+        for (clave, valor) in [("imagenes", json(imagenes)), ("audios", json(audios))] {
+            archivo
+                .poner(clave, valor)
+                .map_err(archivo_de("analisis.json"))?;
+        }
         Ok(resumen)
     }
 
-    /// One clip's entry, or why there is none.
+    /// The job's sound files, and the kit's music when there is one that
+    /// can be read.
+    fn sonidos(inventario: &Inventario, musica_kit: Option<&Path>) -> Vec<Sonido> {
+        let mut sonidos: Vec<Sonido> = inventario.audios.iter().map(Sonido::from).collect();
+        if let Some(ruta) = musica_kit {
+            match crate::ingesta::sondear(ruta) {
+                Ok(medio) => sonidos.push(Sonido {
+                    id: MUSICA_KIT.into(),
+                    ruta: ruta.to_path_buf(),
+                    duracion: (medio.duracion * 1000.0).round() / 1000.0,
+                }),
+                Err(motivo) => log::warn!("the kit's music is not analysed: {motivo}"),
+            }
+        }
+        sonidos
+    }
+
+    fn json<T: Serialize>(valor: T) -> Value {
+        serde_json::to_value(valor).unwrap_or_default()
+    }
+
+    /// One clip's entry, or why there is none; `clave` is its key in the
+    /// cache.
     fn uno(
         analista: &mut Analista,
         video: &Video,
+        clave: Option<String>,
         trabajo: &Path,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<Value, String> {
         let escucha = clip::escuchar(
             analista.oido,
             &video.ruta,
@@ -250,6 +353,7 @@ mod analizar {
         let clip = ClipAnalizado {
             id: &video.id,
             duracion: video.duracion,
+            clave_cache: clave,
             escucha,
             mirada,
         };
@@ -275,6 +379,7 @@ mod tests {
             ruta: format!("{id}.mov").into(),
             duracion: 2.0,
             audio: true,
+            ..Video::default()
         }
     }
 
@@ -292,7 +397,9 @@ mod tests {
                 id: "A".into(),
                 ruta: "a.mov".into(),
                 duracion: 1.5,
-                audio: false
+                fps: 30.0,
+                audio: false,
+                ..Video::default()
             }]
         );
     }

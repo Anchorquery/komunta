@@ -49,7 +49,7 @@ Esfuerzo: **≈10-13 semanas** de una persona hasta tener todo el flujo con los 
 | Red y carpetas | `concat-host` (`ureq = "2"`, `AppDirs`) | Cliente HTTP ya enlazado; `%APPDATA%\Komunta` y `%LOCALAPPDATA%\Komunta`. |
 | Voz local | `src/crates/concat-speech` (whisper.cpp) | Dictado al chat sin enviar audio fuera. |
 | Montaje dentro del proyecto | `concat/src/panes/montaje.rs` (panel Montaje: «Montar con IA», fases y progreso, «Rehacer…», selector `CEREBROS`), sección «Con IA» de Nuevo proyecto, tipo «Automático» (la IA elige receta) | El asistente lanza exactamente esto, no un flujo propio. |
-| Motor | `src/crates/montaje/src/motor.rs` (`python -m motor analizar`, avance en líneas `[fase  45%] mensaje`) | Análisis, transcripción y plan siguen en Python por ahora; el asistente lo usa a través de esta misma pieza. |
+| Corrida del montaje | `concat/src/panes/montaje_corrida.rs` (ingesta, análisis con whisper, descripción y plan, en Rust; avance como `montaje::avance::Avance`), datos en `montaje::Datos` (`%LOCALAPPDATA%\Komunta\montaje`: trabajos, kits, caché, ajustes) | Ya no hay Python: el asistente lanza esta misma corrida. |
 | Guion | `src/crates/montaje/src/guion.rs` (`Guion`, `PlanCrudo` con `alternar_palabra`, `quitar_toma`, `mover_toma`, `cambiar_subtitulo`, `quitar_subtitulo`, `quitar_recurso`, `guardar(trabajo, nota)` con versiones en `ia/versiones`) y `concat/src/panes/guion.rs` (`PaneKind.guion`, `graft`) | La mitad de las herramientas del guion ya existen como métodos; solo hay que exponerlas. |
 | Recetas y kits | `src/crates/montaje/src/receta.rs` (`cargar`, `guardar`, `de_serie`, `automatica`), `kit.rs` (`Kit::cargar`) | Formatos ya en Rust: las herramientas los usan en vez de escribir archivos a mano. Para editar kits falta un `Kit::guardar`. |
 | Paneles | `ui/workspace/pane-switcher.slint` (`PaneKind`: media, preview, inspector, timeline, keyframes, guion) y `seat.slint` | Añadir el chat es una variante más. |
@@ -59,8 +59,6 @@ Esfuerzo: **≈10-13 semanas** de una persona hasta tener todo el flujo con los 
 - **Modo en vivo.** El servidor de la ventana (`concat-server`, `Hub`) tiene su propia `Api` y no ve la sesión de `Studio`; `docs/MCP.md` lo dice («el agente edita proyectos propios»).
 - **Estado de la interfaz** en la API (selección, cabezal, línea de tiempo activa, idioma, si el proyecto tiene montaje).
 - **Herramientas** del guion, del montaje, de recetas y de kits en el catálogo.
-- **Clientes de OpenAI y Gemini en Rust** (hoy solo existen en el motor Python) y el de Anthropic.
-- **Guardado de claves** en la app (el motor las tiene en su `.env`).
 
 ### 2.3 Upstream (jub0t/Concat)
 
@@ -122,7 +120,7 @@ Notas sobre las CLIs con suscripción:
 │                                                ▼                                │
 │                            Herramientas (mismo catálogo para todos)             │
 │                             ├─ Edición: concat-mcp → Backend «Vivo» → Studio    │
-│                             ├─ Montaje y guion: montaje::{motor, guion}, graft  │
+│                             ├─ Montaje y guion: montaje::{Datos, guion}, graft  │
 │                             ├─ Recetas y kits: montaje::{receta, kit}           │
 │                             └─ Interfaz: cabezal, selección, ir a…              │
 │                            Política de confirmación (aquí, para todos)          │
@@ -245,7 +243,7 @@ No hay «crear montaje» aparte: el montaje es una capacidad del proyecto.
 - `proyecto_nuevo(nombre, carpeta, con_ia?)`: con `con_ia` hace lo mismo que la sección «Con IA» de Nuevo proyecto (material, tipo, «¿Qué quieres?», subtítulos, guion); el proyecto se abre y el montaje corre dentro.
 - `montar(tipo, que_quieres, material[], subtitulos?, guion?)`: «Montar con IA» del panel Montaje sobre el proyecto abierto. `tipo` por defecto «Automático» (la IA elige receta).
 - `rehacer(cambios)`: «Rehacer…» con los pasos de la última vez y lo que se cambie.
-- `montaje_estado` y `montaje_cancelar`: fases y progreso (`Avance` de `montaje::motor`).
+- `montaje_estado` y `montaje_cancelar`: fases y progreso (`Avance` de `montaje::avance`).
 - `que_quieres_redactar(notas)`: propone el texto del «¿Qué quieres?» para que la persona lo edite; no lanza nada.
 - `recetas_listar`, `receta_leer` (para explicar o recomendar el tipo).
 

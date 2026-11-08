@@ -4,28 +4,45 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Komunta: what a shoot's clips hold - speech, words, noise - for the montage. The port of the Python engine's motor/analisis.py."
+description = "Komunta: what a shoot's material is and what its clips hold - speech, words, noise - for the montage. The port of the Python engine's motor/ingesta.py and motor/analisis.py."
 
 [features]
 # The listening half - whisper.cpp and ffmpeg - which the app turns on. Off,
 # the deciding half builds and tests in seconds, with no C toolchain.
-escucha = ["dep:concat-media", "dep:concat-speech", "dep:log", "dep:thiserror", "dep:whisper-rs"]
+escucha = ["dep:concat-media", "dep:concat-speech", "dep:thiserror", "dep:whisper-rs"]
 # The looking half: the clip's frames, through ffmpeg.
 imagen = ["dep:concat-core", "dep:concat-media", "dep:thiserror"]
 # And the faces in them: YuNet, on ONNX Runtime.
 vision = ["imagen", "dep:concat-vision"]
+# Gemini over HTTP, and its daily quota: what the planner needs too.
+gemini = ["dep:base64", "dep:ureq"]
+# The AI's description of the material: Gemini and Claude over HTTP.
+describir = ["imagen", "gemini"]
 
 [dependencies]
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
+# The ingest and the contact sheets: the stills, EXIF turn included, the
+# Word documents' text, and the sheets' labels.
+ab_glyph = "0.2"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+roxmltree = "0.21"
+# The cache's fingerprint of a file, the engine's SHA-1.
+sha1 = "0.10"
+# Gemini's daily quota, kept by California's day, and Google's errors read.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+regex = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
+base64 = { version = "0.22", optional = true }
 concat-core = { workspace = true, optional = true }
 concat-media = { workspace = true, optional = true }
 concat-speech = { workspace = true, optional = true }
 concat-vision = { workspace = true, optional = true, features = ["infer"] }
-log = { version = "0.4", optional = true }
 thiserror = { workspace = true, optional = true }
 whisper-rs = { version = "0.16", features = ["raw-api"], optional = true }
+ureq = { version = "2", features = ["json"], optional = true }
 
 [lints]
 workspace = true
@@ -39,5 +56,13 @@ name = "mirar"
 required-features = ["imagen"]
 
 [[example]]
+name = "inventariar"
+required-features = ["imagen"]
+
+[[example]]
 name = "trabajo"
 required-features = ["escucha", "imagen"]
+
+[[example]]
+name = "describir"
+required-features = ["describir"]
