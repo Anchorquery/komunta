@@ -64,10 +64,19 @@ export struct GuionBlockData {
     last: bool,
 }
 
+/// Something the quality check found in the plan.
+export struct GuionWarningData {
+    text: string,
+    /// The AI could put it right on a second pass.
+    fixable: bool,
+}
+
 export global GuionPanel {
     /// The open project was made by a montage, and its plan was found.
     in property <bool> linked;
     in property <[GuionBlockData]> blocks;
+    /// What the quality check finds in the plan as edited.
+    in property <[GuionWarningData]> warnings;
     /// "4 tomas · 0:42 · versión 2".
     in property <string> summary;
     /// There are edits not yet applied.
@@ -323,6 +332,64 @@ component Block inherits Rectangle {
     }
 }
 
+// The quality check of the plan as it stands: what the team should look
+// at before applying it, the ones the AI could fix marked as such.
+component Review inherits Rectangle {
+    in property <[GuionWarningData]> warnings;
+
+    border-radius: Theme.r;
+    background: root.warnings.length > 0 ? Theme.accent-soft : transparent;
+    border-width: 1px;
+    border-color: Theme.line;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            VerticalLayout {
+                alignment: center;
+                Icon {
+                    glyph: root.warnings.length > 0 ? Glyph.info : Glyph.check;
+                    size: 12px;
+                    tint: root.warnings.length > 0 ? Theme.accent : Theme.fg-dim;
+                }
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                text: root.warnings.length > 0
+                    ? I18n.t1("guion.reviewCount", "" + root.warnings.length)
+                    : I18n.t("guion.reviewClean");
+                color: root.warnings.length > 0 ? Theme.fg : Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                font-weight: root.warnings.length > 0 ? Theme.weight-title : 400;
+                vertical-alignment: center;
+            }
+        }
+
+        for warning in root.warnings: HorizontalLayout {
+            spacing: 6px;
+
+            Text {
+                horizontal-stretch: 1;
+                text: warning.text;
+                color: Theme.fg;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+
+            if warning.fixable: Text {
+                text: I18n.t("guion.reviewFixable");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+            }
+        }
+    }
+}
+
 export component GuionPane inherits Pane {
     in property <int> pane-seat;
     in property <bool> pane-removable;
@@ -528,6 +595,8 @@ export component GuionPane inherits Pane {
         VerticalLayout {
             padding: 10px;
             spacing: 8px;
+
+            Review { warnings: GuionPanel.warnings; }
 
             for block in GuionPanel.blocks: Block {
                 block: block;

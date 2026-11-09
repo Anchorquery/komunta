@@ -17,6 +17,8 @@ use crate::kit::Kit;
 use crate::datos::Datos;
 use crate::proyecto::{Formato, Opciones};
 use crate::receta::Receta;
+use crate::entrada::Trabajo;
+use crate::revision::{self, Aviso};
 use crate::{Error, sondeo};
 
 /// The file in the project folder.
@@ -90,6 +92,18 @@ impl Encargo {
             carpeta: proyecto.to_path_buf(),
             sondear: sondeo::sondear,
         })
+    }
+
+    /// What the quality check finds in `trabajo`'s plan as this job would
+    /// lay it out: under its recipe, for its main frame.
+    pub fn revisar(&self, trabajo: &Trabajo) -> Result<Vec<Aviso>, Error> {
+        let horizontal = self
+            .formatos
+            .first()
+            .and_then(|f| Formato::de(f))
+            .is_some_and(|f| f.horizontal());
+        let (trabajo, linea) = crate::linea_final(trabajo.clone(), &self.receta, horizontal)?;
+        Ok(revision::revisar(&trabajo, &linea))
     }
 
     /// Lays the job out as a new project in `proyecto` and links it.

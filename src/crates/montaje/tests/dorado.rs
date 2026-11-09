@@ -3,7 +3,8 @@
 //! The jobs carry clients' footage and words, so they are not in the
 //! repository. To run it, dump the engine's timelines with a script that
 //! writes, per job, `{"trabajo": <job folder>, "linea": construir_linea(...)}`
-//! into a folder, and point `MONTAJE_DORADOS` at it:
+//! into a folder, and point `MONTAJE_DORADOS` at it. A dump may also carry
+//! `"avisos"`: what `revision.analizar` found, its video checks left out.
 //!
 //! ```sh
 //! MONTAJE_DORADOS=/path/to/dorados cargo test -p montaje --test dorado
@@ -13,7 +14,7 @@
 
 use std::path::PathBuf;
 
-use montaje::{Trabajo, construir_linea};
+use montaje::{Trabajo, construir_linea, revision};
 use serde_json::Value;
 
 const MARGEN: f64 = 1e-6;
@@ -85,7 +86,27 @@ fn the_timeline_matches_the_python_engine() {
             !esperada["musica"].is_null(),
             "{nombre}: música"
         );
+        if let Some(avisos) = dorado["avisos"].as_array() {
+            comparar_avisos(&revision::revisar(&trabajo, &linea), avisos, &nombre);
+        }
         vistos += 1;
     }
     assert!(vistos > 0, "no hay dorados en {}", carpeta.display());
+}
+
+fn comparar_avisos(avisos: &[revision::Aviso], esperados: &[Value], nombre: &str) {
+    let textos = |a: &[revision::Aviso]| a.iter().map(|a| a.texto.clone()).collect::<Vec<_>>();
+    let esperados_textos: Vec<String> = esperados
+        .iter()
+        .map(|e| e["texto"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(textos(avisos), esperados_textos, "{nombre}: avisos");
+    for (n, (a, e)) in avisos.iter().zip(esperados).enumerate() {
+        assert_eq!(
+            a.instruccion.as_deref(),
+            e["instruccion"].as_str(),
+            "{nombre} aviso {n}: instrucción"
+        );
+        cerca(a.peso, &e["peso"], &format!("{nombre} aviso {n} peso"));
+    }
 }

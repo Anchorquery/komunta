@@ -219,6 +219,18 @@ pub struct Inventario {
     pub imagenes: Vec<ImagenInventario>,
     /// Every usable audio file.
     pub audios: Vec<AudioInventario>,
+    /// Files of the material that could not be used.
+    pub descartados: Vec<Descartado>,
+}
+
+/// A file set aside, and why.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Descartado {
+    /// Its name, without the folder.
+    pub archivo: String,
+    /// Why it was set aside.
+    pub motivo: String,
 }
 
 /// A video as probed (width and height already turned for rotation).

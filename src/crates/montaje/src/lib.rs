@@ -7,6 +7,9 @@
 //! happens to captions; a [`kit`] brings the client's look. The result is
 //! an ordinary project folder the editor opens, where every cut, caption
 //! and piece of B-roll can still be changed.
+//!
+//! [`revision`] checks a plan's timeline for what the team should look at
+//! (talking too long without B-roll, captions too short to read...).
 
 pub mod ajustes;
 pub mod avance;
@@ -27,6 +30,7 @@ pub mod proveedores;
 pub mod proyecto;
 pub mod python;
 pub mod receta;
+pub mod revision;
 pub mod sondeo;
 pub mod versiones;
 
@@ -92,11 +96,8 @@ pub fn montar(
     receta: &Receta,
     opciones: &Opciones,
 ) -> Result<(Project, DocumentSettings), Error> {
-    let mut trabajo = Trabajo::leer(carpeta)?;
-    let principal = opciones.formatos.first();
-    let horizontal = principal.is_some_and(|f| f.ancho >= f.alto);
-    receta::aplicar(&mut trabajo, receta, if horizontal { 42 } else { 32 });
-    let linea = construir_linea(&trabajo)?;
+    let horizontal = opciones.formatos.first().is_some_and(Formato::horizontal);
+    let (trabajo, linea) = linea_final(Trabajo::leer(carpeta)?, receta, horizontal)?;
     let project = construir_proyecto(&trabajo, &linea, opciones)?;
     let video = &project.active().video;
     let settings = DocumentSettings {
@@ -109,6 +110,19 @@ pub fn montar(
     let document = to_document(&settings, &project);
     let editor = Editor::from_document(&document).ok_or(Error::Proyecto)?;
     Ok((editor.project().clone(), settings))
+}
+
+/// The job as the recipe leaves it, and the timeline it lays out: what
+/// [`montar`] works from. Captions are cut to fit a horizontal or an
+/// upright frame.
+pub fn linea_final(
+    mut trabajo: Trabajo,
+    receta: &Receta,
+    horizontal: bool,
+) -> Result<(Trabajo, Linea), Error> {
+    receta::aplicar(&mut trabajo, receta, if horizontal { 42 } else { 32 });
+    let linea = construir_linea(&trabajo)?;
+    Ok((trabajo, linea))
 }
 
 /// Writes a project folder (`concat.json` inside `destino`) the editor

@@ -52,6 +52,11 @@ impl Formato {
         })
     }
 
+    /// Wider than tall, or square.
+    pub fn horizontal(&self) -> bool {
+        self.ancho >= self.alto
+    }
+
     fn titulo(&self) -> &str {
         match self.nombre.as_str() {
             "vertical" => "Vertical",

@@ -20,13 +20,16 @@ use std::path::{Path, PathBuf};
 use concat_host::projects;
 use concat_project::Project;
 use montaje::guion::{self, Tipo};
+use montaje::revision::Aviso;
 use montaje::{Encargo, Guion, PlanCrudo, Trabajo};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
 use crate::studio::Studio;
-use crate::ui::{App, GuionBlockData, GuionChipData, GuionPanel, GuionRowData, GuionWordData};
+use crate::ui::{
+    App, GuionBlockData, GuionChipData, GuionPanel, GuionRowData, GuionWarningData, GuionWordData,
+};
 
 /// Everything that can happen to the script.
 #[derive(Debug)]
@@ -58,6 +61,8 @@ pub struct GuionPane {
     trabajo: Option<Trabajo>,
     plan: Option<PlanCrudo>,
     guion: Guion,
+    /// The quality check of the plan as edited.
+    avisos: Vec<Aviso>,
     columns: usize,
     dirty: bool,
     busy: bool,
@@ -77,6 +82,7 @@ impl Default for GuionPane {
             trabajo: None,
             plan: None,
             guion: Guion::default(),
+            avisos: Vec::new(),
             columns: 40,
             dirty: false,
             busy: false,
@@ -122,7 +128,7 @@ impl GuionPane {
         self.plan.is_some()
     }
 
-    /// The script again, from the plan as edited.
+    /// The script and its quality check again, from the plan as edited.
     fn rebuild(&mut self) {
         let (Some(plan), Some(trabajo)) = (self.plan.as_ref(), self.trabajo.as_mut()) else {
             return;
@@ -131,6 +137,7 @@ impl GuionPane {
             Ok(nuevo) => {
                 trabajo.plan = nuevo;
                 self.guion = Guion::de(trabajo);
+                self.avisos = revisar(self.encargo.as_ref(), trabajo);
             }
             Err(error) => self.status = error.to_string(),
         }
@@ -344,7 +351,28 @@ impl GuionPane {
             })
             .collect();
         panel.set_blocks(model(blocks));
+        panel.set_warnings(model(
+            self.avisos
+                .iter()
+                .map(|a| GuionWarningData {
+                    text: a.texto.as_str().into(),
+                    fixable: a.corregible(),
+                })
+                .collect(),
+        ));
     }
+}
+
+/// What the quality check finds in the plan; nothing when the plan cannot
+/// be laid out (the pane says why when it is applied).
+fn revisar(encargo: Option<&Encargo>, trabajo: &Trabajo) -> Vec<Aviso> {
+    let Some(encargo) = encargo else {
+        return Vec::new();
+    };
+    encargo.revisar(trabajo).unwrap_or_else(|error| {
+        log::warn!("guion: no review: {error}");
+        Vec::new()
+    })
 }
 
 /// Adds a laid-out montage to the open project as new timelines: the
