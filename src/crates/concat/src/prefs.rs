@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 use concat_host::AppDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::dock::SavedDock;
+
 const FILE: &str = "settings.json";
 
 /// The interface scales Settings > Appearance offers, smallest first, as
@@ -44,6 +46,12 @@ pub struct Preferences {
     /// place the moment the choice is made.
     /// https://github.com/jub0t/Concat/issues/320
     pub ui_scale: Option<u32>,
+    /// The workspace as it was last arranged: which views sit where and how
+    /// far each gutter was dragged. `None`, or a tree this build cannot read,
+    /// is the editor's own arrangement. One for a wide window and one for a
+    /// narrow one, because each keeps its own - see `Studio::set_compact`.
+    pub dock: Option<SavedDock>,
+    pub dock_compact: Option<SavedDock>,
     /// The chosen transcriber model id, e.g. "base.en".
     pub transcriber_model: Option<String>,
     /// The chosen speech model id.

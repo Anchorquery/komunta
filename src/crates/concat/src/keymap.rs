@@ -77,6 +77,12 @@ pub const ACTIONS: &[Action] = &[
         id: "select-all",
         defaults: &["ctrl+a"],
     },
+    // Escape lets go of the selection, as a press on an empty lane does;
+    // with a sheet or a card open, Escape closes that first instead.
+    Action {
+        id: "deselect",
+        defaults: &["escape"],
+    },
     Action {
         id: "copy",
         defaults: &["ctrl+c"],
@@ -194,6 +200,7 @@ pub fn name(id: &str) -> String {
         "undo" => i18n::t("studio.undo"),
         "redo" => i18n::t("studio.redo"),
         "select-all" => i18n::t("shortcuts.selectAll"),
+        "deselect" => i18n::t("shortcuts.deselect"),
         "copy" => i18n::t("common.copy"),
         "paste" => i18n::t("studio.paste"),
         "duplicate" => i18n::t("studio.duplicate"),
@@ -620,6 +627,7 @@ mod tests {
         assert_eq!(resolve(&prefs, "ctrl+plus"), Some("zoom-in"));
         assert_eq!(resolve(&prefs, "ctrl+="), Some("zoom-in"));
         assert_eq!(resolve(&prefs, "ctrl+,"), Some("settings"));
+        assert_eq!(resolve(&prefs, "escape"), Some("deselect"));
         // Unmapped, so nothing takes it.
         assert_eq!(resolve(&prefs, "ctrl+h"), None);
         assert_eq!(resolve(&prefs, "shift+q"), None);

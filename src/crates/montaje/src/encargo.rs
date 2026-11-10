@@ -189,7 +189,11 @@ pub fn anadir(destino: &mut Project, nuevo: Project, version: u32) {
     let mut medios: HashMap<String, String> = HashMap::new();
     for mut medio in nuevo.media {
         let viejo = medio.id.clone();
-        let id = match destino.media.iter().find(|m| m.path == medio.path) {
+        let id = match destino
+            .media
+            .iter()
+            .find(|m| mismo_archivo(&m.path, &medio.path))
+        {
             Some(existente) => existente.id.clone(),
             None => {
                 medio.id = fresco("m");
@@ -204,7 +208,7 @@ pub fn anadir(destino: &mut Project, nuevo: Project, version: u32) {
         if !destino
             .fonts
             .iter()
-            .any(|f| f.family == fuente.family && f.path == fuente.path)
+            .any(|f| f.family == fuente.family && mismo_archivo(&f.path, &fuente.path))
         {
             destino.fonts.push(fuente);
         }
@@ -237,6 +241,12 @@ pub fn anadir(destino: &mut Project, nuevo: Project, version: u32) {
     if let Some(id) = primera {
         destino.active_timeline_id = id;
     }
+}
+
+/// Whether two paths name the same file however they were spelt: a project
+/// the command line wrote may say `C:/a/b` where the app says `C:\a\b`.
+fn mismo_archivo(a: &str, b: &str) -> bool {
+    Path::new(a) == Path::new(b)
 }
 
 /// The highest number behind any id in the project: they share one
@@ -339,6 +349,26 @@ mod tests {
                 assert!(c.media_id.is_empty() || destino.media.iter().any(|m| m.id == c.media_id));
             }
         }
+    }
+
+    #[test]
+    fn a_file_spelt_another_way_is_still_one_item_in_the_bin() {
+        let mut destino = proyecto();
+        let mut nuevo = proyecto();
+        for medio in &mut nuevo.media {
+            medio.path = medio.path.replace('\\', "/");
+        }
+        let mut otro = proyecto();
+        for medio in &mut otro.media {
+            medio.path = medio.path.replace('/', "\\");
+        }
+        anadir(&mut destino, nuevo, 2);
+        anadir(&mut destino, otro, 3);
+        if cfg!(windows) {
+            assert_eq!(destino.media.len(), 1);
+        }
+        assert!(mismo_archivo("a/b/c.png", "a/b/c.png"));
+        assert!(!mismo_archivo("a/b/c.png", "a/b/d.png"));
     }
 
     #[test]

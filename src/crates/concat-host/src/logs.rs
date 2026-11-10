@@ -236,9 +236,36 @@ fn firehose() -> bool {
     *FIREHOSE.get_or_init(|| environment_level().is_some())
 }
 
-/// Whether a target is one of Concat's own crates.
+/// Whether a target is one of the app's own crates: Concat's, and the
+/// montage engine Komunta adds to them.
 fn own(target: &str) -> bool {
-    target.starts_with("concat")
+    const OWN: [&str; 3] = ["concat", "montaje", "analisis"];
+    OWN.iter().any(|crate_name| crate_name_is(target, crate_name))
+}
+
+/// Whether a target is a crate whose Debug is a trace of its own insides:
+/// naga resolving every expression of every shader it compiles, which is
+/// sixteen megabytes before the first frame. Those stay at warnings even
+/// when the environment raises the rest, and come through only at Trace,
+/// where whoever asked for everything gets everything.
+fn chatter(target: &str) -> bool {
+    crate_name_is(target, "naga")
+}
+
+/// Whether a target - a module path - is in the named crate, or in one named
+/// for it with a dash (`concat-host` logs as `concat_host`).
+fn crate_name_is(target: &str, crate_name: &str) -> bool {
+    target
+        .strip_prefix(crate_name)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with("::") || rest.starts_with('_'))
+}
+
+/// The rule [`Logger::enabled`] applies, apart from the global ceiling.
+fn passes(target: &str, level: log::Level, firehose: bool, ceiling: log::LevelFilter) -> bool {
+    if level <= log::Level::Warn || own(target) {
+        return true;
+    }
+    firehose && (!chatter(target) || ceiling == log::LevelFilter::Trace)
 }
 
 /// The open file and how much of its allowance is gone.
@@ -261,9 +288,9 @@ impl log::Log for Logger {
         if metadata.level() > log::max_level() {
             return false;
         }
-        // Concat's own lines at the level asked for; the crates underneath
+        // The app's own lines at the level asked for; the crates underneath
         // at warnings and up, unless the environment asked for everything.
-        own(metadata.target()) || firehose() || metadata.level() <= log::Level::Warn
+        passes(metadata.target(), metadata.level(), firehose(), log::max_level())
     }
 
     fn log(&self, record: &log::Record<'_>) {
@@ -505,5 +532,27 @@ mod tests {
         assert_eq!(level_named(" DEBUG "), Some(log::LevelFilter::Debug));
         assert_eq!(level_named("loud"), None);
         assert_eq!(level_named(""), None);
+    }
+
+    #[test]
+    fn the_apps_own_crates_speak_at_any_level_and_the_rest_at_warnings() {
+        use log::{Level, LevelFilter};
+        let debug = LevelFilter::Debug;
+        for own in ["concat", "concat_host::logs", "montaje::guion", "analisis"] {
+            assert!(passes(own, Level::Debug, false, debug), "{own}");
+        }
+        for other in ["wgpu_core::instance", "naga::front", "montajes", "fontdb"] {
+            assert!(!passes(other, Level::Debug, false, debug), "{other}");
+            assert!(passes(other, Level::Warn, false, debug), "{other}");
+        }
+    }
+
+    #[test]
+    fn the_environment_raises_everything_but_nagas_insides_short_of_trace() {
+        use log::{Level, LevelFilter};
+        assert!(passes("wgpu_core::instance", Level::Debug, true, LevelFilter::Debug));
+        assert!(!passes("naga::front", Level::Debug, true, LevelFilter::Debug));
+        assert!(passes("naga::front", Level::Debug, true, LevelFilter::Trace));
+        assert!(passes("naga::valid", Level::Warn, true, LevelFilter::Debug));
     }
 }

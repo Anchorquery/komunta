@@ -621,6 +621,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     macro_rules! on_dock {
         ($($handler:tt)*) => { handler!(publish_dock, $($handler)*) };
     }
+    // A dock edit that is finished when the handler returns, and so is
+    // remembered for the next launch; the body runs in a closure so that its
+    // early returns still come back here.
+    macro_rules! on_dock_edit {
+        (|$state:ident $(, $arg:ident : $ty:ty)*| $body:block) => {
+            handler!(publish_dock, |$state $(, $arg : $ty)*| {
+                #[allow(clippy::redundant_closure_call)]
+                (|| $body)();
+                $state.remember_dock();
+            })
+        };
+    }
 
     let editor = app.global::<Editor>();
 
@@ -778,7 +790,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         // whichever is showing.
         state.set_compact(width < studio::COMPACT_WIDTH);
     }));
-    editor.on_dock_set(on_dock!(|state, seat: i32, kind: PaneKind| {
+    editor.on_dock_set(on_dock_edit!(|state, seat: i32, kind: PaneKind| {
         let Some(path) = state.dock.leaf_path(seat.max(0) as usize) else {
             return;
         };
@@ -786,7 +798,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             *held = kind;
         }
     }));
-    editor.on_dock_dropped(on_dock!(|state, from: i32, onto: i32, side: DockSide| {
+    editor.on_dock_dropped(on_dock_edit!(|state, from: i32, onto: i32, side: DockSide| {
         let (from, onto) = (from.max(0) as usize, onto.max(0) as usize);
         if from == onto {
             return;
@@ -814,7 +826,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         state.dock.split_leaf(&onto_path, taken, side);
         state.dock.remove_leaf(&from_path);
     }));
-    editor.on_dock_add(on_dock!(|state, kind: PaneKind| {
+    editor.on_dock_add(on_dock_edit!(|state, kind: PaneKind| {
         let seats = state.dock_layout().seats;
         let Some(biggest) = seats
             .iter()
@@ -834,7 +846,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         };
         state.dock.split_leaf(&path, kind, side);
     }));
-    editor.on_dock_remove(on_dock!(|state, seat: i32| {
+    editor.on_dock_remove(on_dock_edit!(|state, seat: i32| {
         let Some(path) = state.dock.leaf_path(seat.max(0) as usize) else {
             return;
         };
@@ -846,6 +858,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             (Some(ratio), Some(extent)) => Some((index, ratio, extent)),
             _ => None,
         };
+    }));
+    editor.on_divider_released(on_dock!(|state| {
+        state.remember_dock();
     }));
     editor.on_divider_dragged(on_dock!(|state, index: i32, delta: f32| {
         let Some((held, from, extent)) = state.divider_press else {

@@ -2253,6 +2253,12 @@ impl Studio {
         let languages = i18n::languages(&host.dirs);
         let recents = projects::recents(&host.dirs.config);
         let text_presets = presets::all(&host.dirs);
+        let remembered = |saved: &Option<crate::dock::SavedDock>| {
+            saved.as_ref().and_then(Dock::from_saved)
+        };
+        let dock = remembered(&prefs.dock).unwrap_or_else(default_dock);
+        let dock_aside =
+            remembered(&prefs.dock_compact).unwrap_or_else(crate::dock::compact_dock);
         let mut studio = Self {
             prefs,
             library: Default::default(),
@@ -2304,8 +2310,8 @@ impl Studio {
             posters_pending: HashSet::new(),
             lengths: HashMap::new(),
             project_name: "Untitled project".into(),
-            dock: default_dock(),
-            dock_aside: crate::dock::compact_dock(),
+            dock,
+            dock_aside,
             compact: false,
             workspace: (0.0, 0.0),
             divider_press: None,
@@ -8818,6 +8824,24 @@ impl Studio {
             std::mem::swap(&mut self.dock, &mut self.dock_aside);
             self.compact = compact;
         }
+    }
+
+    /// Writes both docks to the preferences, so the next launch opens on the
+    /// arrangement this one left. Called once an edit is done - a seat
+    /// changed, a gutter let go - and not on every step of a drag.
+    pub fn remember_dock(&mut self) {
+        let (wide, narrow) = if self.compact {
+            (&self.dock_aside, &self.dock)
+        } else {
+            (&self.dock, &self.dock_aside)
+        };
+        let (wide, narrow) = (Some(wide.saved()), Some(narrow.saved()));
+        if self.prefs.dock == wide && self.prefs.dock_compact == narrow {
+            return;
+        }
+        self.prefs.dock = wide;
+        self.prefs.dock_compact = narrow;
+        self.prefs.save(&self.host.dirs);
     }
 
     pub fn dock_layout(&self) -> DockLayout {

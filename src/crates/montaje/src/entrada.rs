@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 use crate::Error;
 
 /// `ia/plan.json`: which takes, in what order, and what goes over them.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Plan {
     /// The recipe it was made with; for an automatic request, the one the
@@ -28,7 +28,7 @@ pub struct Plan {
 
 /// A take: either words `desde..=hasta` of a transcribed clip, or a shot of
 /// `dur` seconds from `desde_seg` (a clip without speech, or a still).
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Toma {
     /// Inventory id of the video or image.
@@ -61,7 +61,7 @@ impl Toma {
 }
 
 /// A caption over words of a take, or over a span of a shot.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Subtitulo {
     /// The words shown.
@@ -89,7 +89,7 @@ pub struct Subtitulo {
 
 /// A piece of B-roll, anchored to a caption, to a word of a take or to a
 /// second of a take.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Recurso {
     /// Inventory id of the video or image.
@@ -115,7 +115,7 @@ pub struct Recurso {
 }
 
 /// Background music chosen by the plan.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Musica {
     /// Audio id from the analysis (or "musica_kit").

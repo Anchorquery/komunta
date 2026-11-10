@@ -21,6 +21,7 @@ use concat_host::projects;
 use concat_project::Project;
 use montaje::guion::{self, Tipo};
 use montaje::revision::Aviso;
+use montaje::entrada::Plan;
 use montaje::{Encargo, Guion, PlanCrudo, Trabajo};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
@@ -60,6 +61,9 @@ pub struct GuionPane {
     /// The job as read; its plan is the edited one.
     trabajo: Option<Trabajo>,
     plan: Option<PlanCrudo>,
+    /// The plan as it was read, to tell an edit from one taken back by
+    /// hand: toggling a word twice leaves nothing to undo.
+    original: Option<Plan>,
     guion: Guion,
     /// The quality check of the plan as edited.
     avisos: Vec<Aviso>,
@@ -81,6 +85,7 @@ impl Default for GuionPane {
             encargo: None,
             trabajo: None,
             plan: None,
+            original: None,
             guion: Guion::default(),
             avisos: Vec::new(),
             columns: 40,
@@ -110,6 +115,7 @@ impl GuionPane {
             .and_then(|trabajo| Ok((PlanCrudo::leer(&encargo.trabajo)?, trabajo)))
         {
             Ok((plan, trabajo)) => {
+                self.original = plan.plan().ok();
                 self.plan = Some(plan);
                 self.trabajo = Some(trabajo);
                 self.encargo = Some(encargo);
@@ -135,6 +141,7 @@ impl GuionPane {
         };
         match plan.plan() {
             Ok(nuevo) => {
+                self.dirty = self.original.as_ref() != Some(&nuevo);
                 trabajo.plan = nuevo;
                 self.guion = Guion::de(trabajo);
                 self.avisos = revisar(self.encargo.as_ref(), trabajo);
@@ -142,6 +149,12 @@ impl GuionPane {
             Err(error) => self.status = error.to_string(),
         }
         self.revision += 1;
+    }
+
+    /// Whether the plan differs from the one that was read.
+    fn edited(&self) -> bool {
+        let actual = self.plan.as_ref().and_then(|plan| plan.plan().ok());
+        actual.as_ref() != self.original.as_ref()
     }
 
     /// Applies one message.
@@ -173,7 +186,6 @@ impl GuionPane {
             return;
         };
         self.status.clear();
-        self.dirty = true;
         match msg {
             GuionMsg::WordToggled(take, word) => plan.alternar_palabra(index(take), index(word)),
             GuionMsg::TakeRemoved(take) => plan.quitar_toma(index(take)),
@@ -192,6 +204,7 @@ impl GuionPane {
                         sub.texto = text.clone();
                     }
                 }
+                self.dirty = self.edited();
                 return;
             }
             GuionMsg::CaptionRemoved(k) => plan.quitar_subtitulo(index(k)),
@@ -355,7 +368,12 @@ impl GuionPane {
             self.avisos
                 .iter()
                 .map(|a| GuionWarningData {
-                    text: a.texto.as_str().into(),
+                    lines: model(
+                        guion::lineas(&a.texto, self.columns)
+                            .into_iter()
+                            .map(SharedString::from)
+                            .collect(),
+                    ),
                     fixable: a.corregible(),
                 })
                 .collect(),

@@ -203,6 +203,29 @@ pub fn filas(palabras: &[PalabraGuion], columnas: usize) -> Vec<std::ops::Range<
     filas
 }
 
+/// A text broken at spaces into lines of at most `columnas` characters; a
+/// word longer than that keeps a line of its own. For the same reason as
+/// [`filas`]: the interface cannot measure wrapped text.
+pub fn lineas(texto: &str, columnas: usize) -> Vec<String> {
+    let columnas = columnas.max(8);
+    let mut lineas: Vec<String> = Vec::new();
+    let mut actual = String::new();
+    for palabra in texto.split_whitespace() {
+        let ancho = actual.chars().count();
+        if ancho > 0 && ancho + 1 + palabra.chars().count() > columnas {
+            lineas.push(std::mem::take(&mut actual));
+        }
+        if !actual.is_empty() {
+            actual.push(' ');
+        }
+        actual.push_str(palabra);
+    }
+    if !actual.is_empty() {
+        lineas.push(actual);
+    }
+    lineas
+}
+
 /// `ia/plan.json` as JSON, with the script pane's edits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlanCrudo(pub Value);
@@ -436,6 +459,20 @@ mod tests {
         assert_eq!(p.0["plantilla"], "mensaje_a_camara");
     }
 
+    /// A word struck and put back leaves the JSON with an empty list where
+    /// there was none, but the same plan: the script pane has nothing to
+    /// undo then.
+    #[test]
+    fn a_word_put_back_is_the_same_plan() {
+        let antes = plan().plan().unwrap();
+        let mut p = plan();
+        p.alternar_palabra(0, 4);
+        assert_ne!(p.plan().unwrap(), antes);
+        p.alternar_palabra(0, 4);
+        assert_ne!(p.0, plan().0);
+        assert_eq!(p.plan().unwrap(), antes);
+    }
+
     #[test]
     fn removing_a_take_takes_its_captions_and_broll() {
         let mut p = plan();
@@ -497,5 +534,17 @@ mod tests {
             .collect();
         assert_eq!(filas(&palabras, 10), vec![0..2, 2..3, 3..4, 4..5]);
         assert_eq!(filas(&palabras, 80), vec![0..5]);
+    }
+
+    #[test]
+    fn text_wraps_into_lines() {
+        let texto = "Persona hablando 6.1 s seguidos sin recurso (15.0–21.1 s).";
+        assert_eq!(
+            lineas(texto, 20),
+            vec!["Persona hablando 6.1", "s seguidos sin", "recurso (15.0–21.1", "s)."]
+        );
+        assert_eq!(lineas(texto, 200), vec![texto]);
+        assert_eq!(lineas("palabrademasiadolarga corta", 8), vec!["palabrademasiadolarga", "corta"]);
+        assert!(lineas("   ", 20).is_empty());
     }
 }

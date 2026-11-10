@@ -125,6 +125,23 @@ export component App inherits Window {
     property <bool> sheet-open: root.export.open || root.settings.open
         || root.project-sheet.open || root.captions.open || root.speech.open
         || root.start.composing || root.montaje.open;
+    // A sheet over the editor, rather than a card beside it: the editor
+    // under it takes no keys. A floating card is worked beside the
+    // timeline, so it covers nothing; on a phone it is a sheet like the rest.
+    property <bool> editor-covered: root.export.open || root.settings.open
+        || root.project-sheet.open || root.start.composing || root.montaje.open
+        || root.relink.open || root.confirm.open
+        || (root.sheets-fill && (root.captions.open || root.speech.open));
+    // The keyboard back into the sheet on top, from the editor a Tab walked
+    // into behind it. Export draws its own sheet and has no start to go to.
+    function focus-sheet() {
+        if (root.confirm.open) { confirm-dialog.take-focus(); }
+        else if (root.relink.open) { relink-dialog.take-focus(); }
+        else if (root.project-sheet.open) { project-dialog.take-focus(); }
+        else if (root.settings.open) { settings-dialog.take-focus(); }
+        else if (root.start.composing) { new-project-dialog.take-focus(); }
+        else if (root.montaje.open) { montaje-dialog.take-focus(); }
+    }
     changed sheet-open => {
         if (!root.sheet-open) {
             keys.focus();
@@ -459,6 +476,23 @@ export component App inherits Window {
         height: 100%;
         focus-on-tab-navigation: false;
 
+        // Under a sheet, the editor is out of reach of the keyboard: a Tab
+        // that walked out of the sheet lands on something here, and the
+        // Return or Space after it used to press it - the player started
+        // behind the montage wizard. Tab goes back into the sheet; Escape
+        // goes on to close it (below); a chord with a modifier goes on to
+        // the window's own bindings. Every other key stops here.
+        capture-key-pressed(event) => {
+            if (!root.editor-covered || event.text == Key.Escape
+                    || event.modifiers.control || event.modifiers.meta || event.modifiers.alt) {
+                return reject;
+            }
+            if (event.text == Key.Tab || event.text == Key.Backtab) {
+                root.focus-sheet();
+            }
+            return accept;
+        }
+
         // The editor's chords were bound here, one KeyBinding apiece —
         // save, undo, redo, split, copy and the rest. They are the
         // keymap's now: a person moves one in Settings › Shortcuts, and
@@ -547,6 +581,11 @@ export component App inherits Window {
                     if (!root.sheets-fill || !root.captions.running) { root.captions-closed(); }
                     return accept;
                 }
+            }
+            // Nor does a chord reach the editor under a sheet: Delete or
+            // Ctrl+Z must not change the timeline the sheet is in front of.
+            if (root.editor-covered) {
+                return reject;
             }
             if (Editor.key-chord(event.text, event.modifiers.shift, event.modifiers.alt,
                     event.modifiers.control, event.modifiers.meta, root.on-start)) {
@@ -777,7 +816,7 @@ export component App inherits Window {
     // sheet the launch screen can put up, and never at the same time — the
     // scrim keeps the rail from being pressed — so the order between the two
     // decides nothing and this one reads first because it comes first.
-    NewProjectDialog {
+    new-project-dialog := NewProjectDialog {
         fill: root.sheets-fill;
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -807,7 +846,7 @@ export component App inherits Window {
         dismiss-error => { root.start-dismiss-error(); }
     }
 
-    MontajeDialog {
+    montaje-dialog := MontajeDialog {
         fill: root.sheets-fill;
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -856,7 +895,7 @@ export component App inherits Window {
         again => { root.export-again(); }
     }
 
-    SettingsDialog {
+    settings-dialog := SettingsDialog {
         fill: root.sheets-fill;
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -923,7 +962,7 @@ export component App inherits Window {
     callback relink-all();
     callback relink-dismiss();
 
-    ProjectDialog {
+    project-dialog := ProjectDialog {
         fill: root.sheets-fill;
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -946,7 +985,7 @@ export component App inherits Window {
         apply => { root.project-apply(); }
     }
 
-    RelinkDialog {
+    relink-dialog := RelinkDialog {
         fill: root.sheets-fill;
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
@@ -963,7 +1002,7 @@ export component App inherits Window {
     callback confirm-accepted();
     callback confirm-dismissed();
 
-    ConfirmDialog {
+    confirm-dialog := ConfirmDialog {
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
         inset-left: root.safe-area-insets.left;

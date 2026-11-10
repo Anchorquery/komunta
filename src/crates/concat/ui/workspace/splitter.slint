@@ -25,6 +25,8 @@ import { Theme } from "../theme/theme.slint";
 export component ColSplitter inherits Rectangle {
     callback pressed();
     callback moved(delta: length);
+    /// The drag is over: where it left the gutter is worth remembering.
+    callback released();
 
     property <length> origin;
 
@@ -53,6 +55,8 @@ export component ColSplitter inherits Rectangle {
             if (event.kind == PointerEventKind.down) {
                 root.origin = self.absolute-position.x + self.mouse-x;
                 root.pressed();
+            } else if (event.kind == PointerEventKind.up) {
+                root.released();
             }
         }
         moved => {
@@ -64,6 +68,8 @@ export component ColSplitter inherits Rectangle {
 export component RowSplitter inherits Rectangle {
     callback pressed();
     callback moved(delta: length);
+    /// The drag is over: where it left the gutter is worth remembering.
+    callback released();
 
     property <length> origin;
 
@@ -88,6 +94,8 @@ export component RowSplitter inherits Rectangle {
             if (event.kind == PointerEventKind.down) {
                 root.origin = self.absolute-position.y + self.mouse-y;
                 root.pressed();
+            } else if (event.kind == PointerEventKind.up) {
+                root.released();
             }
         }
         moved => {
@@ -110,6 +118,7 @@ export component RowSplitter inherits Rectangle {
 export component HairlineSplitter inherits Rectangle {
     callback pressed();
     callback moved(delta: length);
+    callback released();
 
     /// How far either side of the line a press still takes hold of it.
     /// Three pixels for a pointer; a finger asks for more.
@@ -133,6 +142,8 @@ export component HairlineSplitter inherits Rectangle {
             if (event.kind == PointerEventKind.down) {
                 root.origin = self.absolute-position.x + self.mouse-x;
                 root.pressed();
+            } else if (event.kind == PointerEventKind.up) {
+                root.released();
             }
         }
         moved => {

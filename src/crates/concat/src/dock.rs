@@ -4,6 +4,8 @@
 //! The workspace's arrangement: a tree of splits and views, walked flat
 //! for Slint, which has no recursion.
 
+use serde::{Deserialize, Serialize};
+
 use crate::ui::{DockDivider, DockSide, PaneKind, SeatBox};
 
 pub const SEAT_MIN_W: f32 = 240.0;
@@ -343,4 +345,152 @@ pub fn nearest_row(heights: &[f32], y: f32) -> i32 {
         top += height;
     }
     best
+}
+
+/// A dock as the preferences file keeps it: the same tree, with each view by
+/// name. A name this build does not know, or a ratio that is not a share,
+/// makes the whole of it unreadable, and the editor opens with its own
+/// arrangement instead - half a remembered layout is worse than none.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SavedDock {
+    Leaf(String),
+    Split {
+        columns: bool,
+        ratio: f32,
+        first: Box<SavedDock>,
+        second: Box<SavedDock>,
+    },
+}
+
+/// Deeper than any dock a person drags together; past it the file was not
+/// written by the editor.
+const SAVED_DEPTH: usize = 12;
+
+impl Dock {
+    pub fn saved(&self) -> SavedDock {
+        match self {
+            Dock::Leaf(kind) => SavedDock::Leaf(pane_name(*kind).to_owned()),
+            Dock::Split {
+                columns,
+                ratio,
+                first,
+                second,
+            } => SavedDock::Split {
+                columns: *columns,
+                ratio: *ratio,
+                first: Box::new(first.saved()),
+                second: Box::new(second.saved()),
+            },
+        }
+    }
+
+    pub fn from_saved(saved: &SavedDock) -> Option<Dock> {
+        fn build(node: &SavedDock, depth: usize) -> Option<Dock> {
+            match node {
+                SavedDock::Leaf(name) => pane_named(name).map(Dock::Leaf),
+                SavedDock::Split {
+                    columns,
+                    ratio,
+                    first,
+                    second,
+                } => {
+                    let share = ratio.is_finite() && *ratio > 0.0 && *ratio < 1.0;
+                    if !share || depth >= SAVED_DEPTH {
+                        return None;
+                    }
+                    Some(Dock::Split {
+                        columns: *columns,
+                        ratio: *ratio,
+                        first: Box::new(build(first, depth + 1)?),
+                        second: Box::new(build(second, depth + 1)?),
+                    })
+                }
+            }
+        }
+        build(saved, 0)
+    }
+}
+
+const PANES: [(PaneKind, &str); 6] = [
+    (PaneKind::Media, "media"),
+    (PaneKind::Preview, "preview"),
+    (PaneKind::Inspector, "inspector"),
+    (PaneKind::Timeline, "timeline"),
+    (PaneKind::Keyframes, "keyframes"),
+    (PaneKind::Guion, "guion"),
+];
+
+fn pane_name(kind: PaneKind) -> &'static str {
+    PANES
+        .iter()
+        .find(|(held, _)| *held == kind)
+        .map_or("preview", |(_, name)| *name)
+}
+
+fn pane_named(name: &str) -> Option<PaneKind> {
+    PANES
+        .iter()
+        .find(|(_, held)| *held == name)
+        .map(|(kind, _)| *kind)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn same(a: &Dock, b: &Dock) -> bool {
+        a.saved() == b.saved()
+    }
+
+    #[test]
+    fn a_dock_comes_back_as_it_was_saved() {
+        let mut dock = default_dock();
+        if let Dock::Split { ratio, .. } = &mut dock {
+            *ratio = 0.61;
+        }
+        let path = dock.leaf_path(0).unwrap();
+        dock.split_leaf(&path, PaneKind::Guion, DockSide::Bottom);
+        let json = serde_json::to_string(&dock.saved()).unwrap();
+        let back: SavedDock = serde_json::from_str(&json).unwrap();
+        assert!(same(&Dock::from_saved(&back).unwrap(), &dock));
+    }
+
+    #[test]
+    fn every_pane_has_a_name_of_its_own() {
+        for (kind, name) in PANES {
+            assert_eq!(pane_name(kind), name);
+            assert_eq!(pane_named(name), Some(kind));
+        }
+    }
+
+    #[test]
+    fn an_unknown_pane_or_a_ratio_out_of_range_is_refused() {
+        let leaf = |name: &str| Box::new(SavedDock::Leaf(name.into()));
+        let split = |ratio: f32, first| SavedDock::Split {
+            columns: true,
+            ratio,
+            first,
+            second: leaf("timeline"),
+        };
+        assert!(Dock::from_saved(&split(0.5, leaf("media"))).is_some());
+        assert!(Dock::from_saved(&split(0.5, leaf("mixer"))).is_none());
+        for ratio in [0.0, 1.0, -0.2, f32::NAN, f32::INFINITY] {
+            assert!(Dock::from_saved(&split(ratio, leaf("media"))).is_none());
+        }
+    }
+
+    #[test]
+    fn a_tree_deeper_than_anyone_drags_is_refused() {
+        let mut node = SavedDock::Leaf("media".into());
+        for _ in 0..=SAVED_DEPTH {
+            node = SavedDock::Split {
+                columns: false,
+                ratio: 0.5,
+                first: Box::new(node),
+                second: Box::new(SavedDock::Leaf("preview".into())),
+            };
+        }
+        assert!(Dock::from_saved(&node).is_none());
+    }
 }

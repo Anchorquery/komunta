@@ -66,7 +66,10 @@ export struct GuionBlockData {
 
 /// Something the quality check found in the plan.
 export struct GuionWarningData {
-    text: string,
+    /// The warning broken into lines by Rust, the way a block's words are:
+    /// a wrapped text in a layout leaves the card shorter than what it
+    /// shows.
+    lines: [string],
     /// The AI could put it right on a second pass.
     fixable: bool,
 }
@@ -370,15 +373,11 @@ component Review inherits Rectangle {
             }
         }
 
-        for warning in root.warnings: HorizontalLayout {
-            spacing: 6px;
-
-            Text {
-                horizontal-stretch: 1;
-                text: warning.text;
+        for warning in root.warnings: VerticalLayout {
+            for line in warning.lines: Text {
+                text: line;
                 color: Theme.fg;
                 font-size: Theme.fs-sm;
-                wrap: word-wrap;
             }
 
             if warning.fixable: Text {
@@ -388,6 +387,38 @@ component Review inherits Rectangle {
             }
         }
     }
+}
+
+// The script bar's pieces, laid out in one row or stacked as the pane's
+// width allows.
+component BarSummary inherits Text {
+    text: GuionPanel.status != "" ? GuionPanel.status : GuionPanel.summary;
+    color: Theme.fg-muted;
+    font-size: Theme.fs-sm;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+component RedoButton inherits Button {
+    label: I18n.t("montaje.redo");
+    ghost: true;
+    enabled: !GuionPanel.busy;
+    clicked => { GuionPanel.redo(); }
+}
+
+component RevertButton inherits Button {
+    label: I18n.t("guion.revert");
+    ghost: true;
+    enabled: GuionPanel.dirty && !GuionPanel.busy;
+    clicked => { GuionPanel.revert(); }
+}
+
+component ApplyButton inherits Button {
+    label: GuionPanel.busy ? I18n.t("guion.applying") : I18n.t("guion.apply");
+    glyph: Glyph.sparkle;
+    primary: true;
+    enabled: !GuionPanel.busy;
+    clicked => { GuionPanel.apply(); }
 }
 
 export component GuionPane inherits Pane {
@@ -538,53 +569,47 @@ export component GuionPane inherits Pane {
         }
     }
 
+    // One row while the summary and the three buttons fit; under that,
+    // the summary over Redo and Revert, and Apply across the pane on a
+    // line of its own. A narrow pane used to cut the buttons off.
     if !GuionPanel.running && GuionPanel.linked: Rectangle {
-        height: 40px;
+        property <bool> roomy: self.width >= 460px;
+        height: self.roomy ? 40px : stack.preferred-height + 1px;
         Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
 
-        HorizontalLayout {
-            padding-left: 10px;
-            padding-right: 8px;
-            spacing: 8px;
+        Rectangle {
+            visible: parent.roomy;
 
-            Text {
-                horizontal-stretch: 1;
-                text: GuionPanel.status != "" ? GuionPanel.status : GuionPanel.summary;
-                color: Theme.fg-muted;
-                font-size: Theme.fs-sm;
-                vertical-alignment: center;
-                overflow: elide;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 8px;
+                spacing: 8px;
+
+                BarSummary { horizontal-stretch: 1; }
+                VerticalLayout { alignment: center; RedoButton { } }
+                VerticalLayout { alignment: center; RevertButton { } }
+                VerticalLayout { alignment: center; ApplyButton { } }
             }
+        }
 
-            VerticalLayout {
-                alignment: center;
-                Button {
-                    label: I18n.t("montaje.redo");
-                    ghost: true;
-                    enabled: !GuionPanel.busy;
-                    clicked => { GuionPanel.redo(); }
-                }
-            }
+        Rectangle {
+            visible: !parent.roomy;
 
-            VerticalLayout {
-                alignment: center;
-                Button {
-                    label: I18n.t("guion.revert");
-                    ghost: true;
-                    enabled: GuionPanel.dirty && !GuionPanel.busy;
-                    clicked => { GuionPanel.revert(); }
-                }
-            }
+            stack := VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 6px;
 
-            VerticalLayout {
-                alignment: center;
-                Button {
-                    label: GuionPanel.busy ? I18n.t("guion.applying") : I18n.t("guion.apply");
-                    glyph: Glyph.sparkle;
-                    primary: true;
-                    enabled: !GuionPanel.busy;
-                    clicked => { GuionPanel.apply(); }
+                BarSummary { }
+                HorizontalLayout {
+                    spacing: 8px;
+                    RedoButton { }
+                    RevertButton { }
+                    Rectangle { horizontal-stretch: 1; }
                 }
+                ApplyButton { block: true; }
             }
         }
     }

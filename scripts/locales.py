@@ -57,6 +57,14 @@ LITERAL = r'"((?:[^"\\]|\\.)*)"'
 SLINT_CALL = re.compile(r"I18n\.(?:t[12]?|upper)\(\s*" + LITERAL)
 RUST_CALL = re.compile(r"(?<![A-Za-z_])(?:i18n::)?tf?\(\s*" + LITERAL)
 KEY = re.compile(r"^[a-z][A-Za-z0-9]*(\.[a-z][A-Za-z0-9]*)+$")
+# A family of keys the Rust builds from an id at run time, and so never
+# writes out whole: `t(&format!("montaje.effort.{e}"))`, or
+# `model_key("transcriber.model", &id)`. Each names the prefix its family
+# shares; every line en.json has under one is kept.
+FAMILY = re.compile(
+    r'(?:format!\(\s*"([a-z][A-Za-z0-9.]*\.)\{'
+    r'|model_key\(\s*"([a-z][A-Za-z0-9.]*)")'
+)
 # One entry of i18n.rs's BUILT_IN: `("pt-BR", include_str!("../locales/pt-BR.json")),`.
 BUILT_IN_ENTRY = re.compile(r'\(\s*"([^"]+)",\s*include_str!\("\.\./locales/([^"]+)\.json"\)\s*\)')
 
@@ -112,6 +120,17 @@ def code_keys() -> set[str]:
     return {key for key in out if key.strip("{}0123456789 ")}
 
 
+def built_families() -> tuple[str, ...]:
+    """The prefixes of the key families the Rust builds at run time; see
+    FAMILY."""
+    out: set[str] = set()
+    for path in (CRATE / "src").rglob("*.rs"):
+        for match in FAMILY.finditer(live(path.read_text(encoding="utf-8"), True)):
+            built, modelled = match.groups()
+            out.add(built or modelled + ".")
+    return tuple(sorted(out))
+
+
 def read(path: pathlib.Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -136,6 +155,10 @@ def inventory() -> tuple[dict[str, str], list[str]]:
             wanted[key] = current[key]
         else:
             problems.append(f"no English: {key!r} - add it to en.json")
+    families = built_families()
+    for key, english in current.items():
+        if key != "_" and key.startswith(families):
+            wanted.setdefault(key, english)
     return wanted, problems
 
 

@@ -518,9 +518,12 @@ export component FormRow inherits Rectangle {
     property <length> body-x: root.stacked ? 0px : root.label-w + 20px;
     property <length> body-y: root.stacked ? 30px : 18px;
 
-    height: root.body-y + body.preferred-height + 18px;
+    // Tall enough for a label that wraps as well as for the body: a label
+    // longer than its column in another language goes onto a second line
+    // rather than being cut.
+    height: Math.max(root.body-y + body.preferred-height, caption.y + caption.preferred-height) + 18px;
 
-    Text {
+    caption := Text {
         x: 0;
         // Against the first line of the body rather than the top of the
         // row: a ten-pixel label hung from the same y as a thirty-pixel
@@ -532,6 +535,7 @@ export component FormRow inherits Rectangle {
         font-family: Theme.font-technical;
         font-size: Theme.fs-xs;
         letter-spacing: 0.9px;
+        wrap: word-wrap;
     }
 
     body := VerticalLayout {
@@ -1724,7 +1728,10 @@ component WideHome inherits Rectangle {
                 SectionHead {
                     height: 34px;
                     text: I18n.t("start.recentProjects");
-                    count: root.recents-total > 0 ? "\{root.recents-total}" : "";
+                    // While a search narrows the list: how many it shows of all.
+                    count: root.recents-total == 0 ? ""
+                        : root.recents.length == root.recents-total ? "\{root.recents-total}"
+                        : "\{root.recents.length} / \{root.recents-total}";
 
                     // Past a page of them: by the time there are more
                     // than a screen holds, the eye is not a search.
@@ -1967,7 +1974,10 @@ component NarrowHome inherits Rectangle {
             SectionHead {
                 height: 28px;
                 text: I18n.t("start.recentProjects");
-                count: root.recents-total > 0 ? "\{root.recents-total}" : "";
+                // While a search narrows the list: how many it shows of all.
+                count: root.recents-total == 0 ? ""
+                    : root.recents.length == root.recents-total ? "\{root.recents-total}"
+                    : "\{root.recents.length} / \{root.recents-total}";
             }
 
             if root.searchable: VerticalLayout {

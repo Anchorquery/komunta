@@ -6,6 +6,7 @@ import { Theme } from "../theme/theme.slint";
 import { Glyph, Icon } from "../icons.slint";
 import { Tip } from "tooltip.slint";
 import { Select } from "select.slint";
+import { FocusRing } from "focus-ring.slint";
 
 // The dialog layer this tree did not have.
 //
@@ -60,6 +61,13 @@ export component Modal inherits Rectangle {
     callback closed();
     /// A floating card was pressed on its header: it wants to be in front.
     callback raised();
+
+    /// Puts the keyboard at the start of the sheet, so the next Tab reaches
+    /// its first field: where a Tab that wandered into the editor behind
+    /// is sent back to.
+    public function take-focus() {
+        entry.focus();
+    }
 
     visible: root.open;
     // A card opened comes to the front.
@@ -130,113 +138,136 @@ export component Modal inherits Rectangle {
         // monitor under the card.
         TouchArea { }
 
-        body := VerticalLayout {
-            Rectangle {
-                height: 42px;
+        // Where take-focus() puts the keyboard: invisible, and not a Tab
+        // stop of its own, so the Tab after it reaches the first field.
+        entry := FocusScope {
+            width: 0px;
+            height: 0px;
+            focus-on-click: false;
+            focus-on-tab-navigation: false;
+        }
 
-                // What drags a floating card, under the title and the ×.
-                if root.floating: TouchArea {
-                    mouse-cursor: move;
-                    pointer-event(event) => {
-                        if (event.kind == PointerEventKind.down) {
-                            root.raised();
-                        }
-                    }
-                    moved => {
-                        if (self.pressed) {
-                            root.dx = Math.max(root.min-dx, Math.min(root.max-dx,
-                                root.dx + self.mouse-x - self.pressed-x));
-                            root.dy = Math.max(root.min-dy, Math.min(root.max-dy,
-                                root.dy + self.mouse-y - self.pressed-y));
-                        }
-                    }
+        // Escape from anywhere inside closes the sheet, as its × does. The
+        // sheets sit outside the editor's key scope, so the Escape there
+        // never heard a key pressed in one of their fields.
+        FocusScope {
+            focus-on-click: false;
+            focus-on-tab-navigation: false;
+            key-pressed(event) => {
+                if (event.text == Key.Escape && (root.dismissable || root.floating)) {
+                    root.closed();
+                    return accept;
                 }
-
-                Rectangle {
-                    x: 0;
-                    y: parent.height - 1px;
-                    width: parent.width;
-                    height: 1px;
-                    background: Theme.line;
-                }
-
-                // The note on one edge and the close on the other, so the
-                // centred title has matching weight either side of it rather
-                // than being pushed off true by whichever one is longer.
-                HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 12px;
-                    spacing: 8px;
-
-                    if root.note != "": Text {
-                        text: root.note;
-                        color: Theme.fg-dim;
-                        font-family: Theme.font-technical;
-                        font-size: Theme.fs-sm;
-                        vertical-alignment: center;
-                    }
-
-                    Rectangle { horizontal-stretch: 1; }
-
-                    // Gone, not disabled, while a job is running: there is no
-                    // safe answer to pressing it, so it should not be there to
-                    // press. A floating card's always is: closing it leaves
-                    // the job running, to be seen again when it is opened.
-                    if root.dismissable || root.floating: VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: 26px;
-                            height: 26px;
-                            border-radius: Theme.r-sm;
-                            background: shut.has-hover ? Theme.field : Colors.transparent;
-
-                            Icon {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                glyph: Glyph.close;
-                                size: 13px;
-                                tint: shut.has-hover ? Theme.fg : Theme.fg-muted;
-                            }
-
-                            shut := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.closed(); }
-                            }
-                        }
-                    }
-                }
-
-                // Placed against the whole strip rather than laid out, so it
-                // stays centred in the sheet and not in whatever space the
-                // note and the close button leave over — the same trick the
-                // window's own title bar uses for the project name.
-                centre := HorizontalLayout {
-                    x: (parent.width - self.preferred-width) / 2;
-                    y: 0;
-                    width: self.preferred-width;
-                    height: parent.height;
-                    spacing: 8px;
-
-                    VerticalLayout {
-                        alignment: center;
-                        Icon {
-                            glyph: root.glyph;
-                            size: 16px;
-                            tint: Theme.accent;
-                        }
-                    }
-
-                    Text {
-                        text: root.title;
-                        color: Theme.fg;
-                        font-size: Theme.fs-lg;
-                        font-weight: Theme.weight-title;
-                        vertical-alignment: center;
-                    }
-                }
+                return reject;
             }
+            body := VerticalLayout {
+                Rectangle {
+                    height: 42px;
 
-            @children
+                    // What drags a floating card, under the title and the ×.
+                    if root.floating: TouchArea {
+                        mouse-cursor: move;
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.down) {
+                                root.raised();
+                            }
+                        }
+                        moved => {
+                            if (self.pressed) {
+                                root.dx = Math.max(root.min-dx, Math.min(root.max-dx,
+                                    root.dx + self.mouse-x - self.pressed-x));
+                                root.dy = Math.max(root.min-dy, Math.min(root.max-dy,
+                                    root.dy + self.mouse-y - self.pressed-y));
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        x: 0;
+                        y: parent.height - 1px;
+                        width: parent.width;
+                        height: 1px;
+                        background: Theme.line;
+                    }
+
+                    // The note on one edge and the close on the other, so the
+                    // centred title has matching weight either side of it rather
+                    // than being pushed off true by whichever one is longer.
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 12px;
+                        spacing: 8px;
+
+                        if root.note != "": Text {
+                            text: root.note;
+                            color: Theme.fg-dim;
+                            font-family: Theme.font-technical;
+                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        // Gone, not disabled, while a job is running: there is no
+                        // safe answer to pressing it, so it should not be there to
+                        // press. A floating card's always is: closing it leaves
+                        // the job running, to be seen again when it is opened.
+                        if root.dismissable || root.floating: VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 26px;
+                                height: 26px;
+                                border-radius: Theme.r-sm;
+                                background: shut.has-hover ? Theme.field : Colors.transparent;
+
+                                Icon {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    glyph: Glyph.close;
+                                    size: 13px;
+                                    tint: shut.has-hover ? Theme.fg : Theme.fg-muted;
+                                }
+
+                                shut := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.closed(); }
+                                }
+                            }
+                        }
+                    }
+
+                    // Placed against the whole strip rather than laid out, so it
+                    // stays centred in the sheet and not in whatever space the
+                    // note and the close button leave over — the same trick the
+                    // window's own title bar uses for the project name.
+                    centre := HorizontalLayout {
+                        x: (parent.width - self.preferred-width) / 2;
+                        y: 0;
+                        width: self.preferred-width;
+                        height: parent.height;
+                        spacing: 8px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Icon {
+                                glyph: root.glyph;
+                                size: 16px;
+                                tint: Theme.accent;
+                            }
+                        }
+
+                        Text {
+                            text: root.title;
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            font-weight: Theme.weight-title;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                @children
+            }
         }
     }
 }
@@ -273,6 +304,8 @@ export component Button inherits Rectangle {
     /// the red the danger tone hovers into — a dark wash, not a fill
     property <color> danger-wash: Theme.danger-wash;
     property <color> danger-edge: Theme.danger-edge;
+    /// Reached with Tab, so the ring says where the keyboard is.
+    property <bool> ring;
 
     min-height: root.large ? 34px : 28px;
     max-height: root.large ? 34px : 28px;
@@ -303,6 +336,25 @@ export component Button inherits Rectangle {
         : root.ghost ? (root.lit ? Theme.fg : Theme.fg-muted)
         : Theme.fg;
 
+    // Under the TouchArea, as in IconButton: a press reaches the button, and
+    // only Tab brings the keyboard here, which is when the ring shows.
+    FocusScope {
+        enabled: root.enabled;
+        focus-gained(reason) => {
+            root.ring = reason == FocusReason.tab-navigation;
+        }
+        focus-lost => {
+            root.ring = false;
+        }
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.clicked();
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+    }
+
     HorizontalLayout {
         alignment: center;
         spacing: root.gap;
@@ -329,6 +381,11 @@ export component Button inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+
+    FocusRing {
+        active: root.ring;
+        radius: Theme.r;
     }
 }
 

@@ -82,6 +82,10 @@ pub struct MontajePane {
     pub open: bool,
     /// The sheet is redoing the project's montage rather than making one.
     redo: bool,
+    /// The project the sheet was last filled in for. Opened again over the
+    /// same project it keeps what was chosen and typed; a sheet put down by
+    /// mistake used to lose the request with it.
+    filled_for: Option<PathBuf>,
     step: i32,
     material: String,
     /// What the material folder holds, worked out when it changes rather
@@ -120,6 +124,7 @@ impl Default for MontajePane {
         Self {
             open: false,
             redo: false,
+            filled_for: None,
             step: 0,
             material: String::new(),
             material_note: String::new(),
@@ -293,9 +298,19 @@ impl MontajePane {
         self.refresh(studio);
         let last = Encargo::leer(&proyecto);
         self.redo = last.is_some();
-        if let Some(encargo) = last {
-            self.fill(&encargo);
+        if !self.keeps_edits_for(&proyecto) {
+            if let Some(encargo) = last {
+                self.fill(&encargo);
+            }
+            self.filled_for = Some(proyecto);
         }
+    }
+
+    /// Whether the sheet already holds what was chosen for `proyecto`, so
+    /// opening it again must not put the last montage's choices back over
+    /// them.
+    fn keeps_edits_for(&self, proyecto: &Path) -> bool {
+        self.filled_for.as_deref() == Some(proyecto)
     }
 
     /// The recipes and brand kits as they are on disk now.
@@ -758,4 +773,22 @@ fn material_note(material: &str) -> String {
             &docs.to_string(),
         ],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Opened again over the project it was filled in for, the sheet keeps
+    /// its edits; over another project it is filled in afresh.
+    #[test]
+    fn the_sheet_keeps_its_edits_for_the_same_project() {
+        let pane = MontajePane {
+            filled_for: Some(PathBuf::from("/proyectos/uno")),
+            ..MontajePane::default()
+        };
+        assert!(pane.keeps_edits_for(Path::new("/proyectos/uno")));
+        assert!(!pane.keeps_edits_for(Path::new("/proyectos/dos")));
+        assert!(!MontajePane::default().keeps_edits_for(Path::new("/proyectos/uno")));
+    }
 }
