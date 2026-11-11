@@ -23,6 +23,10 @@ use crate::trabajo::Archivo;
 /// Gemini's quota would not leave them, the description is skipped.
 pub const RESERVA_PLAN: u32 = 4;
 
+/// How long a model may take to describe a batch before the next one is
+/// asked: a batch takes Gemini well under a minute.
+const ESPERA_GEMINI: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
 /// Who describes, with what.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Proveedor {
@@ -104,7 +108,7 @@ pub fn describir(encargo: &Encargo, mut avisar: impl FnMut(&str)) -> io::Result<
         }
         let parcial = match proveedor {
             Proveedor::Google { clave, modelos, limite_diario } => {
-                let gemini = Gemini::new(clave.clone());
+                let gemini = Gemini::new(clave.clone(), ESPERA_GEMINI);
                 con_gemini(encargo, &gemini, modelos, *limite_diario, pendientes, &mut archivo, &mut avisar)?
             }
             Proveedor::Anthropic { clave, modelo } => {

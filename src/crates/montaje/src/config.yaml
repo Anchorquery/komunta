@@ -17,7 +17,7 @@ ia:
   segunda_pasada: true
   # When the chosen planner fails (quota, overloaded, offline...), these take over, in order.
   # The API ones only with a key kept.
-  respaldo: [anthropic, openai]
+  respaldo: [anthropic, openai, google]
   claude_code: {modelo: opus}
   codex: {}
   gemini_cli: {}

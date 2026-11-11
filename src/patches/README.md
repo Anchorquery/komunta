@@ -71,6 +71,12 @@ slower everywhere else (#388). One change, marked `Concat:` in `build.rs`:
   encoding was some thirty seconds a clip. The build script watches
   `whisper.cpp` and copies it over again when a file changes: the
   published one copied it once, so a cached build never saw a change.
+- Komunta: on MSVC the module build also links the baseline CPU module's
+  import library (`ggml-cpu-x64.lib` with the variants), found in CMake's
+  build tree. whisper-rs's `SystemInfo` calls `ggml_cpu_has_*`, which only
+  the CPU modules hold; the shipped build's LTO drops that unused code, but
+  a build without LTO (the `quick` profile) failed to link. MSVC imports
+  only what is still referred to, so the shipped binary does not change.
 
 And the copy is smaller than the published crate: ggml's GPU backends that
 no build compiles (CANN, CUDA, Hexagon, HIP, MUSA, OpenCL, RPC, SYCL,

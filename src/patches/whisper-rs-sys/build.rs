@@ -364,6 +364,9 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", destination.display());
     if backend_dl {
         link_shared(&destination, &out);
+        if target.contains("msvc") {
+            link_cpu_base(&out, env_on("GGML_CPU_ALL_VARIANTS"));
+        }
     } else {
         link_static();
     }
@@ -405,6 +408,35 @@ fn link_shared(destination: &std::path::Path, out: &std::path::Path) {
     println!("cargo:rustc-link-lib=dylib=ggml");
     println!("cargo:rustc-link-lib=dylib=ggml-base");
     copy_runtime(destination, out);
+}
+
+// Komunta: whisper-rs's `SystemInfo` calls `ggml_cpu_has_*`, which a module
+// build keeps in the CPU backend modules only. The shipped build's LTO
+// drops that unused code; a build without LTO (the `quick` profile) still
+// refers to them and fails to link. The baseline module's import library,
+// left by CMake in its build tree, is linked as well: MSVC imports only
+// what is still referred to, so the shipped binary does not change.
+fn link_cpu_base(out: &std::path::Path, variants: bool) {
+    let name = if variants { "ggml-cpu-x64" } else { "ggml-cpu" };
+    match find_dir_with(&out.join("build"), &format!("{name}.lib")) {
+        Some(dir) => {
+            println!("cargo:rustc-link-search=native={}", dir.display());
+            println!("cargo:rustc-link-lib=dylib={name}");
+        }
+        None => println!("cargo:warning={name}.lib not found under {}", out.display()),
+    }
+}
+
+// Komunta: the first folder under `dir` holding a file called `file`.
+fn find_dir_with(dir: &std::path::Path, file: &str) -> Option<PathBuf> {
+    if dir.join(file).is_file() {
+        return Some(dir.to_path_buf());
+    }
+    let entries = std::fs::read_dir(dir).ok()?;
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .find_map(|entry| find_dir_with(&entry.path(), file))
 }
 
 // Concat: every runtime library of the shared build - whisper, ggml,

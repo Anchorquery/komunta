@@ -13,10 +13,10 @@
 //!   --marcas <carpeta>       the brand kits' folder (default: two
 //!                            folders above the job)
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use montaje::{Formato, Kit, Opciones, escribir, montar, receta, sondeo};
+use montaje::{Formato, Kit, Opciones, Receta, escribir, montar, receta, sondeo};
 
 fn main() -> ExitCode {
     match ejecutar() {
@@ -49,6 +49,9 @@ fn ejecutar() -> Result<PathBuf, String> {
     let [trabajo, salida] = posicionales.as_slice() else {
         return Err(USO.to_owned());
     };
+    // The project keeps the paths it is given: whole ones, so it opens from
+    // anywhere.
+    let salida = &std::path::absolute(salida).map_err(|e| e.to_string())?;
     // What the engine chose for the job: template and brand kit.
     let estado: serde_json::Value = std::fs::read_to_string(trabajo.join("estado.json"))
         .ok()
@@ -66,10 +69,7 @@ fn ejecutar() -> Result<PathBuf, String> {
         .cloned()
         .or_else(|| estado["plantilla"].as_str().map(str::to_owned))
         .unwrap_or_else(|| "mensaje_a_camara".to_owned());
-    let receta = recetas
-        .into_iter()
-        .find(|r| r.id == id_receta)
-        .ok_or(format!("no hay receta «{id_receta}»"))?;
+    let receta = elegir_receta(trabajo, &recetas, &id_receta)?;
 
     let nombres: Vec<String> = match opcion.get("formatos") {
         Some(lista) => lista.split(',').map(|f| f.trim().to_owned()).collect(),
@@ -115,4 +115,21 @@ fn ejecutar() -> Result<PathBuf, String> {
     let (project, settings) =
         montar(trabajo, &nombre, &receta, &opciones).map_err(|e| e.to_string())?;
     escribir(salida, &settings, &project).map_err(|e| e.to_string())
+}
+
+/// The recipe `id`; for "automatica", the one the AI chose, which its plan
+/// names in "plantilla".
+fn elegir_receta(trabajo: &Path, recetas: &[Receta], id: &str) -> Result<Receta, String> {
+    let elegida = if id == receta::AUTOMATICA {
+        let plan: serde_json::Value = std::fs::read_to_string(trabajo.join("ia").join("plan.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        let plantilla = plan["plantilla"].as_str().unwrap_or_default();
+        receta::elegida(recetas, plantilla)
+            .ok_or(format!("el plan no dice qué receta eligió la IA («{plantilla}»)"))?
+    } else {
+        recetas.iter().find(|r| r.id == id).ok_or(format!("no hay receta «{id}»"))?
+    };
+    Ok(elegida.clone())
 }

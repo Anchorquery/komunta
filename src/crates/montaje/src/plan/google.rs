@@ -29,7 +29,7 @@ impl Google {
     /// Gemini as `ia.google` sets it, with key `clave`.
     pub fn new(entorno: &Entorno, clave: Option<String>) -> Self {
         Self {
-            gemini: clave.map(Gemini::new),
+            gemini: clave.map(|clave| Gemini::new(clave, entorno.limite())),
             modelos: modelos(entorno.opciones("google")),
             cuota: Cuota::en(entorno.cuota.clone()),
             historial: Vec::new(),

@@ -49,7 +49,10 @@ pub enum ErrorGemini {
     CuotaAgotada(DateTime<FixedOffset>),
     /// Every model is overloaded right now.
     Saturado,
-    /// Anything else: a bad key, no network...
+    /// No model answered at all - no network, or Google left the call
+    /// hanging past the time limit; what the last one failed with.
+    SinRespuesta(String),
+    /// Anything else: a bad key...
     Otro(String),
 }
 
@@ -62,6 +65,7 @@ impl std::fmt::Display for ErrorGemini {
                 reanudar.format("%H:%M")
             ),
             ErrorGemini::Saturado => write!(f, "google: Gemini está saturado ahora mismo; reintenta en unos minutos"),
+            ErrorGemini::SinRespuesta(texto) => write!(f, "google: Gemini no respondió ({texto})"),
             ErrorGemini::Otro(texto) => write!(f, "google: {texto}"),
         }
     }
@@ -76,11 +80,17 @@ enum Clase {
     LimitePorMinuto,
     /// Overloaded: once more, then the next model.
     Saturado,
+    /// No answer at all - the network, or a model that hangs past the time
+    /// limit: straight on to the next model, and not this one again.
+    SinRespuesta,
     /// Not worth repeating.
     Otro,
 }
 
 fn clasificar(fallo: &Fallo) -> Clase {
+    if fallo.codigo.is_none() {
+        return Clase::SinRespuesta;
+    }
     let texto = &fallo.texto;
     let limite = fallo.codigo == Some(429) || texto.contains("RESOURCE_EXHAUSTED");
     let saturado = matches!(fallo.codigo, Some(500 | 502 | 503 | 504))
@@ -98,19 +108,25 @@ fn clasificar(fallo: &Fallo) -> Clase {
 /// counting every attempt in `cuota`; `dormir` waits. A model out of
 /// today's quota is marked and skipped; a per-minute limit is waited out
 /// (90 s at most); an overloaded model gets one more try. When every model
-/// is overloaded, the round is repeated after 30 s and then 90 s.
+/// is overloaded, the round is repeated after 30 s and then 90 s. A model
+/// that gives no answer at all is left for the rest of the call.
 pub fn con_reintentos<T>(
     cuota: &Cuota,
     modelos: &[String],
     mut llamada: impl FnMut(&str) -> Result<T, Fallo>,
     mut dormir: impl FnMut(Duration),
 ) -> Result<T, ErrorGemini> {
+    let mut mudos: Vec<&str> = Vec::new();
+    let mut sin_respuesta = String::new();
     for espera in [0, 30, 90] {
-        dormir(Duration::from_secs(espera));
-        let vivos: Vec<&String> = modelos.iter().filter(|m| !cuota.agotado(m)).collect();
+        let vivos: Vec<&String> = modelos
+            .iter()
+            .filter(|m| !cuota.agotado(m) && !mudos.contains(&m.as_str()))
+            .collect();
         if vivos.is_empty() {
             break;
         }
+        dormir(Duration::from_secs(espera));
         for modelo in vivos {
             let mut intento = 0;
             while intento < 3 {
@@ -130,9 +146,17 @@ pub fn con_reintentos<T>(
                     Clase::LimitePorMinuto => dormir(cuota::espera_por_minuto(&fallo.texto)),
                     Clase::Saturado if intento == 1 => dormir(Duration::from_secs(8)),
                     Clase::Saturado => break,
+                    Clase::SinRespuesta => {
+                        mudos.push(modelo);
+                        sin_respuesta = recortar(&fallo.texto);
+                        break;
+                    }
                 }
             }
         }
+    }
+    if modelos.iter().all(|m| cuota.agotado(m) || mudos.contains(&m.as_str())) && !mudos.is_empty() {
+        return Err(ErrorGemini::SinRespuesta(sin_respuesta));
     }
     if !modelos.iter().all(|m| cuota.agotado(m)) {
         return Err(ErrorGemini::Saturado);
@@ -154,11 +178,15 @@ pub struct Gemini {
 }
 
 impl Gemini {
-    /// The API with `clave`.
-    pub fn new(clave: String) -> Self {
+    /// The API with `clave`, waiting up to `espera` for an answer. Google
+    /// says nothing until the whole answer is ready, so the wait for the
+    /// first byte is the wait for the answer; a model that hangs then
+    /// fails as no answer, and the next model is asked.
+    pub fn new(clave: String, espera: Duration) -> Self {
         let agente = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(20))
-            .timeout(Duration::from_secs(15 * 60))
+            .timeout_write(Duration::from_secs(5 * 60))
+            .timeout_read(espera)
             .build();
         Self { clave, agente }
     }
@@ -286,6 +314,7 @@ mod tests {
         assert_eq!(clasificar(&fallo(429, "per minute")), Clase::LimitePorMinuto);
         assert_eq!(clasificar(&fallo(503, "UNAVAILABLE")), Clase::Saturado);
         assert_eq!(clasificar(&fallo(400, "API key not valid")), Clase::Otro);
+        assert_eq!(clasificar(&Fallo { codigo: None, texto: "timed out".into() }), Clase::SinRespuesta);
     }
 
     #[test]
@@ -339,6 +368,75 @@ mod tests {
         assert_eq!(respuesta, Err(ErrorGemini::Saturado));
         assert_eq!(*intentos.borrow(), 6);
         assert_eq!(*esperas.borrow(), [0, 8, 30, 8, 90, 8]);
+    }
+
+    fn sin_respuesta() -> Fallo {
+        Fallo { codigo: None, texto: "Network Error: timed out reading response".into() }
+    }
+
+    #[test]
+    fn a_model_that_does_not_answer_gives_way_to_the_next_at_once() {
+        let cuota = cuota("mudo");
+        let modelos = ["flash".to_owned(), "pro".to_owned()];
+        let pedidos = RefCell::new(Vec::new());
+        let esperas = RefCell::new(Vec::new());
+
+        let respuesta = con_reintentos(
+            &cuota,
+            &modelos,
+            |modelo| {
+                pedidos.borrow_mut().push(modelo.to_owned());
+                match modelo {
+                    "flash" => Err(sin_respuesta()),
+                    _ => Ok("hecho"),
+                }
+            },
+            |espera| esperas.borrow_mut().push(espera.as_secs()),
+        );
+
+        assert_eq!(respuesta, Ok("hecho"));
+        assert_eq!(*pedidos.borrow(), ["flash", "pro"]);
+        assert_eq!(*esperas.borrow(), [0]);
+        assert!(!cuota.agotado("flash"));
+    }
+
+    #[test]
+    fn when_no_model_answers_each_is_asked_once_and_that_is_told() {
+        let cuota = cuota("mudos");
+        let modelos = ["flash".to_owned(), "pro".to_owned()];
+        let intentos = RefCell::new(0);
+        let respuesta: Result<(), _> = con_reintentos(
+            &cuota,
+            &modelos,
+            |_| {
+                *intentos.borrow_mut() += 1;
+                Err(sin_respuesta())
+            },
+            |_| {},
+        );
+        assert!(matches!(respuesta, Err(ErrorGemini::SinRespuesta(ref t)) if t.contains("timed out")));
+        assert_eq!(*intentos.borrow(), 2);
+    }
+
+    #[test]
+    fn a_silent_model_does_not_hold_up_an_overloaded_one_s_rounds() {
+        let cuota = cuota("mezcla");
+        let modelos = ["flash".to_owned(), "pro".to_owned()];
+        let pedidos = RefCell::new(Vec::new());
+        let respuesta: Result<(), _> = con_reintentos(
+            &cuota,
+            &modelos,
+            |modelo| {
+                pedidos.borrow_mut().push(modelo.to_owned());
+                match modelo {
+                    "flash" => Err(sin_respuesta()),
+                    _ => Err(fallo(503, "UNAVAILABLE")),
+                }
+            },
+            |_| {},
+        );
+        assert_eq!(respuesta, Err(ErrorGemini::Saturado));
+        assert_eq!(*pedidos.borrow(), ["flash", "pro", "pro", "pro", "pro", "pro", "pro"]);
     }
 
     #[test]
