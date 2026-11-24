@@ -86,7 +86,7 @@ fn orden(preferido: &str, cerebro: Option<&str>) -> [Proveedor; 2] {
 /// The models to describe with: the team's choice, else the engine's -
 /// for Gemini, `descripcion.modelo` or `ia.google.modelo`, then
 /// `ia.google.respaldo`, each with a quota of its own.
-fn modelos(proveedor: Proveedor, ia: &Ia, config: &Value) -> Vec<String> {
+pub fn modelos(proveedor: Proveedor, ia: &Ia, config: &Value) -> Vec<String> {
     let del_equipo = ia.modelos.get(proveedor.id()).cloned();
     let del_motor = config["ia"][proveedor.id()]["modelo"].as_str().map(str::to_owned);
     if proveedor != Proveedor::Google {

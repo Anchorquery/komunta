@@ -64,6 +64,9 @@ export enum Glyph {
     mask-star,
     chevron-right,
     sparkle,
+    /// the assistant: a speech bubble, and the arrow its words go with
+    chat,
+    send,
     eye,
     lock,
     frame,
@@ -411,6 +414,20 @@ export component Icon inherits Rectangle {
     if root.glyph == Glyph.search: Stroked {
         size: root.size; tint: root.tint; weight: root.weight;
         commands: "M21 21l-4.34-4.34 M3 11a8 8 0 1 0 16 0a8 8 0 1 0 -16 0";
+    }
+
+    // lucide/message-square
+    if root.glyph == Glyph.chat: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5"
+            + "a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z";
+    }
+
+    // lucide/send-horizontal
+    if root.glyph == Glyph.send: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627"
+            + "a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z M6 12h16";
     }
 
     // lucide/sparkles

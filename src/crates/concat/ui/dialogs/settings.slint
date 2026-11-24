@@ -137,6 +137,11 @@ export struct SettingsData {
     download-base: string,
     /// the Concat API served on a socket while the window is open
     server-enabled: bool,
+    /// live mode: a caller edits the project on screen, through the window
+    live-enabled: bool,
+    /// the agent in the assistant's pane: Komunta's own, Gemini CLI,
+    /// Claude Code, Codex
+    panel-agent: int,
     /// the two halves of "127.0.0.1:7420"
     server-host: string,
     server-port: int,
@@ -679,6 +684,8 @@ export component SettingsDialog inherits Modal {
     callback download-source-changed(index: int);
     callback download-base-edited(text: string);
     callback server-enabled-changed(on: bool);
+    callback live-enabled-changed(on: bool);
+    callback panel-agent-changed(index: int);
     callback server-host-edited(text: string);
     callback server-port-edited(port: int);
     callback server-token-edited(text: string);
@@ -1339,6 +1346,31 @@ export component SettingsDialog inherits Modal {
                         font-size: Theme.fs-sm;
                         wrap: word-wrap;
                     }
+                }
+
+                // Live mode (#337): off, the project on screen is the
+                // person's alone and a caller is refused it; on, a caller
+                // edits it through the window, one undo step per call.
+                if root.data.server-enabled: DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.liveMode");
+                    hint: I18n.t("settings.liveModeHint");
+                    switchable: true;
+                    on: root.data.live-enabled;
+                    switched(on) => { root.live-enabled-changed(on); }
+                }
+
+                // Who works in the assistant's pane. An outside agent
+                // brings its own AI and account, and reaches the project
+                // through live mode.
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.panelAgent");
+                    hint: I18n.t("settings.panelAgentHint");
+                    choices: ["Komunta", "Gemini CLI", "Claude Code", "Codex"];
+                    choice: root.data.panel-agent;
+                    chose(index) => { root.panel-agent-changed(index); }
+                    open: false;
                 }
 
                 DialogSection {

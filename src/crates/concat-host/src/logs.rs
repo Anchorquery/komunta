@@ -237,9 +237,9 @@ fn firehose() -> bool {
 }
 
 /// Whether a target is one of the app's own crates: Concat's, and the
-/// montage engine Komunta adds to them.
+/// montage engine and the assistant Komunta adds to them.
 fn own(target: &str) -> bool {
-    const OWN: [&str; 3] = ["concat", "montaje", "analisis"];
+    const OWN: [&str; 4] = ["concat", "montaje", "analisis", "asistente"];
     OWN.iter().any(|crate_name| crate_name_is(target, crate_name))
 }
 
@@ -538,7 +538,7 @@ mod tests {
     fn the_apps_own_crates_speak_at_any_level_and_the_rest_at_warnings() {
         use log::{Level, LevelFilter};
         let debug = LevelFilter::Debug;
-        for own in ["concat", "concat_host::logs", "montaje::guion", "analisis"] {
+        for own in ["concat", "concat_host::logs", "montaje::guion", "analisis", "asistente::bucle"] {
             assert!(passes(own, Level::Debug, false, debug), "{own}");
         }
         for other in ["wgpu_core::instance", "naga::front", "montajes", "fontdb"] {

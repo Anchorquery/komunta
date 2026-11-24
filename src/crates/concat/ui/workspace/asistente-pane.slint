@@ -1,0 +1,712 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Komunikia
+
+// Komunta's assistant: a chat with an AI that edits the project on screen.
+// Laid out the way agent panels are (Zed's, VS Code's, Claude's): the
+// field pinned at the bottom of the pane, a card with the choices that
+// shape the next turn under the words - the model, how much it thinks,
+// the agent's mode - and the send button, which is Stop while a turn
+// runs. The agent itself is picked at the top. The conversation reads
+// upwards from the field, the newest line always in sight: the person's
+// words in a card on the right, the assistant's as plain text, each tool
+// it used ticked off between them; while a turn runs, three dots and what
+// the AI is doing close it. With nothing said yet, a few requests to
+// start from. Everything one turn does is undone with one Ctrl+Z.
+//
+// The state is all Rust's (`panes::asistente`), in the `AsistentePanel`
+// global, so two seats showing the chat are one chat.
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { IconButton } from "../primitives/panel.slint";
+import { Button } from "../primitives/modal.slint";
+import { Select } from "../primitives/select.slint";
+import { Pane, PaneHeader } from "pane.slint";
+import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
+
+/// One thing said, broken into lines by Rust: Slint has no flowing text
+/// inside a layout that measures it.
+export struct AsistenteLineaData {
+    /// 0 the person, 1 the assistant, 2 the window (a failure, a notice),
+    /// 3 a tool the assistant used.
+    quien: int,
+    filas: [string],
+    /// Small print under it: how long the turn took.
+    meta: string,
+}
+
+/// A choice under the field: what it is about (0 the model, 1 how much
+/// it thinks, 2 the agent's mode), its values and which it has.
+export struct AsistenteOpcionData {
+    faceta: int,
+    valores: [string],
+    actual: int,
+}
+
+/// One task of the agent's plan: 0 pending, 1 under way, 2 done.
+export struct AsistenteTareaData {
+    texto: string,
+    estado: int,
+}
+
+export global AsistentePanel {
+    in property <[AsistenteLineaData]> lines;
+    /// The agent's plan, as it last wrote it.
+    in property <[AsistenteTareaData]> plan;
+    /// A call waits for the person's yes: what it is and what it will do.
+    in property <bool> asking;
+    in property <string> ask-title;
+    in property <string> ask-detail;
+    /// A turn is under way: nothing more is sent until it ends.
+    in property <bool> busy;
+    /// What the turn under way is doing.
+    in property <string> status;
+    /// The agents the pane can talk to, Komunta's own first, and which.
+    in property <[string]> agents;
+    in property <int> agent;
+    /// The choices under the field, for that agent.
+    in property <[AsistenteOpcionData]> options;
+
+    /// The pane is this many characters wide, near enough.
+    callback resized(columns: int);
+    callback send(text: string);
+    /// A new conversation.
+    callback clear();
+    /// The answer to the call waiting: yes or no.
+    callback answer(yes: bool);
+    /// Stops the turn under way after the tool that is running.
+    callback stop();
+    callback agent-chosen(index: int);
+    /// The choice at `option` set to its value at `value`.
+    callback option-chosen(option: int, value: int);
+}
+
+// The agent's plan, above the conversation: each task with its mark.
+component Plan inherits Rectangle {
+    in property <[AsistenteTareaData]> tareas;
+
+    border-radius: Theme.r;
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.line;
+
+    VerticalLayout {
+        padding: 8px;
+        padding-left: 10px;
+        spacing: 4px;
+
+        Text {
+            text: I18n.t("asistente.plan");
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            font-weight: 600;
+        }
+
+        for tarea in root.tareas: HorizontalLayout {
+            spacing: 6px;
+
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: tarea.estado == 0 ? Theme.fg-dim : tarea.estado == 1 ? Theme.accent : Theme.green;
+                    background: tarea.estado == 0 ? Colors.transparent : tarea.estado == 1 ? Theme.accent : Theme.green;
+                }
+            }
+
+            Text {
+                text: tarea.texto;
+                color: tarea.estado == 2 ? Theme.fg-dim : Theme.fg;
+                font-size: Theme.fs-lg;
+                font-weight: tarea.estado == 1 ? 600 : 400;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+// A call waiting for the person's yes: what it will do, and the two
+// answers.
+component Aprobar inherits Rectangle {
+    in property <string> titulo;
+    in property <string> detalle;
+    callback answer(yes: bool);
+
+    border-radius: Theme.r-lg;
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.accent;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        Text {
+            text: root.titulo;
+            color: Theme.fg;
+            font-size: Theme.fs-lg;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: root.detalle;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-lg;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            spacing: 6px;
+
+            Button {
+                label: I18n.t("asistente.reject");
+                ghost: true;
+                clicked => { root.answer(false); }
+            }
+
+            Button {
+                label: I18n.t("asistente.approve");
+                primary: true;
+                clicked => { root.answer(true); }
+            }
+        }
+    }
+}
+
+// The conversation's measures. Rust breaks the lines (Slint has no
+// flowing text inside a layout that measures it), at about as many
+// characters as fit across the person's card - the narrowest text - at
+// the mean width of a character of the body size.
+global Medidas {
+    out property <length> texto: Theme.fs-xl;
+    out property <length> letra: 6.9px;
+    /// The conversation's side padding.
+    out property <length> lado: 14px;
+    /// Inside the person's card.
+    out property <length> relleno: 12px;
+    /// How far the person's card stays from the left edge.
+    out property <length> sangria: 16px;
+}
+
+// The conversation, held to its bottom edge: when it outgrows the pane the
+// oldest lines go off the top, and the wheel brings them back.
+component ChatScroll inherits Rectangle {
+    // How far up from the newest line the person has scrolled, clamped on
+    // read so a shorter conversation cannot leave it past the top.
+    property <length> overflow: Math.max(0px, content.preferred-height - root.height);
+    property <length> back;
+    property <length> at: Math.min(root.overflow, Math.max(0px, root.back));
+
+    clip: true;
+
+    wheel := TouchArea {
+        scroll-event(event) => {
+            root.back = Math.min(root.overflow, Math.max(0px, root.at + event.delta-y));
+            return EventResult.accept;
+        }
+
+        // Placed by hand, `x` and all: a child with an `x` is left out of
+        // its parent's constraints, so the conversation's height does not
+        // cap the pane's - it did, and the field rose to the middle of a
+        // pane with little said.
+        content := VerticalLayout {
+            x: 0;
+            y: Math.min(0px, root.height - self.preferred-height) + root.at;
+            width: root.width;
+            height: self.preferred-height;
+            padding-left: Medidas.lado;
+            padding-right: Medidas.lado;
+            padding-top: 14px;
+            padding-bottom: 14px;
+            spacing: 14px;
+
+            @children
+        }
+    }
+}
+
+// Rows of text, as Rust broke them.
+component Filas inherits VerticalLayout {
+    in property <[string]> filas;
+    in property <color> color: Theme.fg;
+    in property <length> size: Medidas.texto;
+
+    spacing: 3px;
+
+    for fila in root.filas: Text {
+        text: fila;
+        color: root.color;
+        font-size: root.size;
+    }
+}
+
+// The person's words: a card on the right.
+component Persona inherits HorizontalLayout {
+    in property <AsistenteLineaData> line;
+
+    alignment: end;
+    padding-left: Medidas.sangria;
+
+    Rectangle {
+        border-radius: Theme.r-lg;
+        background: Theme.raised;
+        border-width: 1px;
+        border-color: Theme.line;
+
+        VerticalLayout {
+            padding-left: Medidas.relleno;
+            padding-right: Medidas.relleno;
+            padding-top: 9px;
+            padding-bottom: 9px;
+
+            Filas { filas: root.line.filas; }
+        }
+    }
+}
+
+// The assistant's words: plain text across the pane, with how long the
+// turn took under them.
+component Asistente inherits VerticalLayout {
+    in property <AsistenteLineaData> line;
+
+    spacing: 5px;
+
+    Filas { filas: root.line.filas; }
+
+    if root.line.meta != "": Text {
+        text: root.line.meta;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-sm;
+    }
+}
+
+// A tool the assistant used, ticked off: one quiet row.
+component Accion inherits HorizontalLayout {
+    in property <AsistenteLineaData> line;
+
+    alignment: start;
+    spacing: 8px;
+
+    VerticalLayout {
+        alignment: start;
+        padding-top: 2px;
+        Icon {
+            glyph: Glyph.check;
+            size: 12px;
+            tint: Theme.green;
+        }
+    }
+
+    Filas {
+        filas: root.line.filas;
+        color: Theme.fg-muted;
+        size: Theme.fs-lg;
+    }
+}
+
+// What the window says: a failure, on danger's wash.
+component Aviso inherits Rectangle {
+    in property <AsistenteLineaData> line;
+
+    border-radius: Theme.r;
+    background: Theme.danger-soft;
+    border-width: 1px;
+    border-color: Theme.danger-edge;
+
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: start;
+            Icon {
+                glyph: Glyph.info;
+                size: 14px;
+                tint: Theme.danger;
+            }
+        }
+
+        Filas {
+            filas: root.line.filas;
+            color: Theme.fg;
+            size: Theme.fs-lg;
+        }
+    }
+}
+
+// The turn under way: three dots that breathe, and what the AI is doing.
+component Escribiendo inherits HorizontalLayout {
+    in property <string> status;
+
+    property <duration> tick: animation-tick();
+
+    alignment: start;
+    spacing: 10px;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 4px;
+
+        for i in 3: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: Theme.accent;
+                opacity: 0.25 + 0.75 * Math.abs(Math.sin((root.tick / 1ms) * 0.18deg - i * 40deg));
+            }
+        }
+    }
+
+    Text {
+        text: root.status;
+        color: Theme.fg-muted;
+        font-size: Theme.fs-lg;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// A request to start from: one click sends it.
+component Sugerencia inherits Rectangle {
+    in property <string> text;
+    callback send(text: string);
+
+    min-height: 38px;
+    border-radius: Theme.r-lg;
+    background: touch.has-hover ? Theme.field-hover : Colors.transparent;
+    border-width: 1px;
+    border-color: touch.has-hover ? Theme.line-strong : Theme.line;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+
+        Text {
+            text: root.text;
+            color: touch.has-hover ? Theme.fg : Theme.fg-muted;
+            font-size: Theme.fs-lg;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.send(root.text); }
+    }
+}
+
+// Nothing said yet: a question, a line on how it works, and three
+// requests to start from, in the middle of the pane above the field.
+component Bienvenida inherits VerticalLayout {
+    in property <bool> enabled: true;
+    callback send(text: string);
+
+    alignment: center;
+    padding-left: Medidas.lado;
+    padding-right: Medidas.lado;
+    spacing: 10px;
+
+    Text {
+        text: I18n.t("asistente.helloTitle");
+        color: Theme.fg;
+        font-size: 20px;
+        font-weight: 600;
+        wrap: word-wrap;
+    }
+
+    Text {
+        text: I18n.t("asistente.hello");
+        color: Theme.fg-muted;
+        font-size: Theme.fs-lg;
+        wrap: word-wrap;
+    }
+
+    VerticalLayout {
+        padding-top: 8px;
+        spacing: 6px;
+
+        for sugerencia in [
+            I18n.t("asistente.suggest1"),
+            I18n.t("asistente.suggest2"),
+            I18n.t("asistente.suggest3"),
+        ]: Sugerencia {
+            text: sugerencia;
+            send(text) => {
+                if (root.enabled) {
+                    root.send(text);
+                }
+            }
+        }
+    }
+}
+
+// The send button: an arrow on the accent when there is something to
+// send, a square that stops the turn while one runs.
+component Enviar inherits Rectangle {
+    in property <bool> listo;
+    in property <bool> busy;
+    callback send();
+    callback stop();
+
+    property <bool> activo: root.listo || root.busy;
+
+    width: 30px;
+    height: 30px;
+    border-radius: self.width / 2;
+    background: root.busy ? (touch.has-hover ? Theme.line-strong : Theme.raised)
+        : !root.listo ? Colors.transparent
+        : touch.has-hover ? Theme.accent-hover : Theme.accent;
+    border-width: root.busy ? 1px : 0px;
+    border-color: Theme.line-strong;
+
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        glyph: root.busy ? Glyph.stop : Glyph.send;
+        size: root.busy ? 12px : 15px;
+        tint: root.busy ? Theme.fg : root.listo ? Theme.on-accent : Theme.fg-dim;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.activo ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            if (root.busy) {
+                root.stop();
+            } else if (root.listo) {
+                root.send();
+            }
+        }
+    }
+}
+
+// The field: a card at the bottom of the pane with the person's words -
+// Enter sends, Shift+Enter starts a line - and under them the choices for
+// the next turn and the send button. It grows with the words up to six
+// lines or so. Words can be written while a turn runs; they go when it
+// ends.
+component Composer inherits Rectangle {
+    in property <bool> busy;
+    in property <[AsistenteOpcionData]> opciones;
+
+    callback send(text: string);
+    callback stop();
+    callback chose(option: int, value: int);
+
+    property <bool> listo: !root.busy && input.text != "";
+    property <length> alto: Math.min(132px, Math.max(22px, input.preferred-height));
+
+    function enviar() {
+        if (root.listo) {
+            root.send(input.text);
+            input.text = "";
+        }
+    }
+
+    vertical-stretch: 0;
+    border-radius: Theme.r-lg;
+    background: Theme.field;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.line-strong;
+
+    TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+
+    VerticalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        padding-top: 11px;
+        padding-bottom: 8px;
+        spacing: 8px;
+
+        Rectangle {
+            height: root.alto;
+            clip: true;
+
+            keys := FocusScope {
+                focus-on-tab-navigation: false;
+
+                // Enter sends; Shift+Enter is the field's own new line.
+                capture-key-pressed(event) => {
+                    if (event.text == Key.Return && !event.modifiers.shift) {
+                        root.enviar();
+                        return accept;
+                    }
+                    return reject;
+                }
+
+                input := TextInput {
+                    x: 0;
+                    y: 0;
+                    width: parent.width - 4px;
+                    height: Math.max(root.alto, self.preferred-height);
+                    color: Theme.fg;
+                    font-size: Theme.fs-xl;
+                    single-line: false;
+                    wrap: word-wrap;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+                }
+            }
+
+            if input.text == "": Text {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                text: I18n.t("asistente.placeholder");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xl;
+                overflow: elide;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 2px;
+
+            for opcion[indice] in root.opciones: Select {
+                flat: true;
+                snug: true;
+                height: 26px;
+                min-width: 44px;
+                max-width: self.natural-width;
+                horizontal-stretch: 0;
+                // How much it thinks and the mode wear a mark, not words:
+                // the pane is narrow, and the model's name needs the room.
+                // The words are in the list, and in the mark's tip.
+                icons: opcion.faceta == 1 ? [Glyph.meter, Glyph.meter, Glyph.meter, Glyph.meter, Glyph.meter, Glyph.meter]
+                    : opcion.faceta == 2 ? [Glyph.hand, Glyph.hand, Glyph.hand, Glyph.hand, Glyph.hand, Glyph.hand, Glyph.hand, Glyph.hand]
+                    : [];
+                options: opcion.valores;
+                current: opcion.actual;
+                enabled: !root.busy;
+                changed(valor) => { root.chose(indice, valor); }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            VerticalLayout {
+                alignment: center;
+                Enviar {
+                    listo: root.listo;
+                    busy: root.busy;
+                    send => { root.enviar(); }
+                    stop => { root.stop(); }
+                }
+            }
+        }
+    }
+}
+
+export component AsistentePane inherits Pane {
+    in property <int> pane-seat;
+    in property <bool> pane-removable;
+    callback pane-picked(kind: PaneKind);
+    callback pane-removed();
+
+    // About how many characters fit across the person's card, for Rust to
+    // break the lines by.
+    property <int> columnas: Math.max(16, Math.floor(
+        (self.width - 2 * Medidas.lado - Medidas.sangria - 2 * Medidas.relleno - 6px) / Medidas.letra));
+    changed columnas => { AsistentePanel.resized(self.columnas); }
+    init => { AsistentePanel.resized(self.columnas); }
+
+    // The agent picked at the top, where the title would be: it is what
+    // the pane is.
+    PaneHeader {
+        title: "";
+
+        VerticalLayout {
+            alignment: center;
+            Select {
+                flat: true;
+                snug: true;
+                height: 28px;
+                min-width: 60px;
+                max-width: self.natural-width;
+                horizontal-stretch: 0;
+                options: AsistentePanel.agents;
+                current: AsistentePanel.agent;
+                enabled: !AsistentePanel.busy;
+                changed(index) => { AsistentePanel.agent-chosen(index); }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                glyph: Glyph.plus;
+                label: I18n.t("asistente.clear");
+                enabled: !AsistentePanel.busy;
+                clicked => { AsistentePanel.clear(); }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            PaneSwitcher {
+                kind: PaneKind.asistente;
+                seat: root.pane-seat;
+                removable: root.pane-removable;
+                picked(kind) => { root.pane-picked(kind); }
+                removed => { root.pane-removed(); }
+            }
+        }
+    }
+
+    if AsistentePanel.lines.length == 0 && !AsistentePanel.busy: Bienvenida {
+        vertical-stretch: 1;
+        send(text) => { AsistentePanel.send(text); }
+    }
+
+    if AsistentePanel.lines.length > 0 || AsistentePanel.busy: ChatScroll {
+        vertical-stretch: 1;
+
+        for line in AsistentePanel.lines: VerticalLayout {
+            if line.quien == 0: Persona { line: line; }
+            if line.quien == 1: Asistente { line: line; }
+            if line.quien == 2: Aviso { line: line; }
+            if line.quien == 3: Accion { line: line; }
+        }
+
+        if AsistentePanel.busy: Escribiendo {
+            status: AsistentePanel.status != "" ? AsistentePanel.status : I18n.t("asistente.thinking");
+        }
+    }
+
+    // Only as tall as what it holds: the conversation, or the welcome,
+    // takes the rest of the pane.
+    VerticalLayout {
+        vertical-stretch: 0;
+        padding: 10px;
+        padding-top: 4px;
+        spacing: 6px;
+
+        if AsistentePanel.plan.length > 0: Plan {
+            tareas: AsistentePanel.plan;
+        }
+
+        if AsistentePanel.asking: Aprobar {
+            titulo: AsistentePanel.ask-title;
+            detalle: AsistentePanel.ask-detail;
+            answer(yes) => { AsistentePanel.answer(yes); }
+        }
+
+        Composer {
+            busy: AsistentePanel.busy;
+            opciones: AsistentePanel.options;
+            send(text) => { AsistentePanel.send(text); }
+            stop => { AsistentePanel.stop(); }
+            chose(option, value) => { AsistentePanel.option-chosen(option, value); }
+        }
+    }
+}

@@ -52,6 +52,8 @@ export struct MontajeData {
     captions: int,
     /// A script file outside the material; empty for none.
     script: string,
+    /// The documents in the material, when it brings any; empty for none.
+    script-note: string,
     /// The whisper models the language asked for needs are downloaded.
     models-ok: bool,
     /// Which are missing, and where to get them, when they are not.
@@ -137,9 +139,11 @@ component MaterialField inherits VerticalLayout {
     }
 }
 
-// The script file: none, or one outside the material.
+// The script file: one outside the material, the documents the material
+// brings, or none.
 component ScriptField inherits HorizontalLayout {
     in property <string> script;
+    in property <string> note;
     callback action(name: string);
 
     spacing: 12px;
@@ -147,7 +151,9 @@ component ScriptField inherits HorizontalLayout {
     Text {
         horizontal-stretch: 1;
         vertical-alignment: center;
-        text: root.script == "" ? I18n.t("montaje.scriptNone") : root.script;
+        text: root.script != "" ? root.script
+            : root.note != "" ? root.note
+            : I18n.t("montaje.scriptNone");
         color: root.script == "" ? Theme.fg-dim : Theme.fg;
         font-size: Theme.fs;
         font-family: root.script == "" ? Theme.font : Theme.font-technical;
@@ -501,6 +507,7 @@ export component MontajeDialog inherits Modal {
 
                 ScriptField {
                     script: root.data.script;
+                    note: root.data.script-note;
                     action(name) => { root.action(name); }
                 }
             }

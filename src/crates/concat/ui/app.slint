@@ -38,6 +38,7 @@ import { ChipOption, NewProjectDialog, RecentProjectData, StartData, StartScreen
 import { TitleBar } from "title-bar.slint";
 import { MontajeData, MontajeDialog } from "montaje.slint";
 import { GuionBlockData, GuionChipData, GuionPanel, GuionRowData, GuionWarningData, GuionWordData } from "workspace/guion-pane.slint";
+import { AsistenteLineaData, AsistentePanel, AsistenteTareaData } from "workspace/asistente-pane.slint";
 import { PhoneEditor } from "phone/editor.slint";
 import {
     AppliedEntryData, AppliedParamData, CatalogueEntryData, Library, LibraryViewData,
@@ -70,6 +71,7 @@ export {
     CaptionsSheetData, SpeechSheetData, VoiceoverData, SoundCardData, Sounds, VoiceCardData,
     MontajeData, MontajeSettingsData, ProveedorIaData,
     GuionPanel, GuionBlockData, GuionChipData, GuionRowData, GuionWarningData, GuionWordData,
+    AsistentePanel, AsistenteLineaData, AsistenteTareaData,
 }
 
 export component App inherits Window {
@@ -167,6 +169,8 @@ export component App inherits Window {
     callback montaje-setting-choice(field: string, value: int);
     callback montaje-setting-action(name: string);
     callback montaje-open();
+    /// Komunta: the assistant's chat, shown or put away.
+    callback asistente-toggle();
     callback montaje-close();
     callback montaje-text(field: string, value: string);
     callback montaje-choice(field: string, value: int);
@@ -304,6 +308,8 @@ export component App inherits Window {
     callback settings-download-source-changed(index: int);
     callback settings-download-base-edited(text: string);
     callback settings-server-enabled-changed(on: bool);
+    callback settings-live-enabled-changed(on: bool);
+    callback settings-panel-agent-changed(index: int);
     callback settings-server-host-edited(text: string);
     callback settings-server-port-edited(port: int);
     callback settings-server-token-edited(text: string);
@@ -639,6 +645,7 @@ export component App inherits Window {
                 add-pane(kind) => { Editor.dock-add(kind); }
                 export-clicked => { root.export-clicked(); }
                 montage-clicked => { root.montaje-open(); }
+                assistant-clicked => { root.asistente-toggle(); }
             }
 
             if root.on-start: StartScreen {
@@ -944,6 +951,8 @@ export component App inherits Window {
         download-source-changed(index) => { root.settings-download-source-changed(index); }
         download-base-edited(text) => { root.settings-download-base-edited(text); }
         server-enabled-changed(on) => { root.settings-server-enabled-changed(on); }
+        live-enabled-changed(on) => { root.settings-live-enabled-changed(on); }
+        panel-agent-changed(index) => { root.settings-panel-agent-changed(index); }
         server-host-edited(text) => { root.settings-server-host-edited(text); }
         server-port-edited(port) => { root.settings-server-port-edited(port); }
         server-token-edited(text) => { root.settings-server-token-edited(text); }

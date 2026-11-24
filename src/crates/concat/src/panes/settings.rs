@@ -65,6 +65,8 @@ pub enum SettingsMsg {
     DownloadSourceChanged(i32),
     DownloadBaseEdited(String),
     ServerEnabledChanged(bool),
+    LiveEnabledChanged(bool),
+    PanelAgentChanged(i32),
     /// The address half of where the server listens; the port is its own
     /// field, so a person types "127.0.0.1" and "7420" and never a colon.
     ServerHostEdited(String),
@@ -348,6 +350,15 @@ impl SettingsPane {
                 studio.prefs.save(&studio.host.dirs);
                 Self::apply_download_source(studio);
             }
+            SettingsMsg::PanelAgentChanged(index) => {
+                studio.prefs.server.agent = crate::panes::asistente_externo::id_de(index);
+                studio.prefs.save(&studio.host.dirs);
+            }
+            SettingsMsg::LiveEnabledChanged(on) => {
+                studio.prefs.server.live = on;
+                studio.prefs.save(&studio.host.dirs);
+                studio.host.live.set(on);
+            }
             SettingsMsg::ServerEnabledChanged(on) => {
                 studio.prefs.server.enabled = on;
                 studio.prefs.save(&studio.host.dirs);
@@ -626,6 +637,8 @@ impl SettingsPane {
         self.server_error.clear();
         let exporter = studio.host.exporter.clone();
         let open_projects = studio.host.open_projects.clone();
+        let live = studio.host.live.clone();
+        live.set(studio.prefs.server.live);
         let dirs = studio.host.dirs.clone();
         let prefs = &studio.prefs.server;
         if !prefs.enabled {
@@ -659,6 +672,7 @@ impl SettingsPane {
                     let mut api = concat_api::Api::new(events)?;
                     api.share_exporter(exporter);
                     api.share_open_projects(open_projects);
+                    api.share_live_window(std::sync::Arc::new(crate::en_vivo::VentanaViva::default()), live);
                     Ok(api)
                 })
             });
@@ -861,6 +875,8 @@ impl SettingsPane {
             download_source: self.download_source as i32,
             download_base: self.download_base.as_str().into(),
             server_enabled: studio.prefs.server.enabled,
+            live_enabled: studio.prefs.server.live,
+            panel_agent: crate::panes::asistente_externo::indice(&studio.prefs.server.agent),
             server_host: split_listen(&studio.prefs.server.listen).0.into(),
             server_port: i32::from(split_listen(&studio.prefs.server.listen).1),
             server_token: match &studio.host.server {

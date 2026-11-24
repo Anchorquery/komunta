@@ -40,6 +40,8 @@ use crate::ui::{App, GuionPanel, MontajeData, MontajeSettingsData, PaneKind};
 /// The montage's Settings page.
 pub const SETTINGS_PAGE: i32 = 8;
 
+pub(crate) mod asistente;
+
 /// Everything that can happen to the montage.
 #[derive(Debug)]
 pub enum MontajeMsg {
@@ -91,6 +93,9 @@ pub struct MontajePane {
     /// What the material folder holds, worked out when it changes rather
     /// than on every publish.
     material_note: String,
+    /// The documents the material holds, which the AI reads as the script
+    /// when no other is chosen.
+    script_note: String,
     /// "Automático" first, then the recipes it chooses among.
     recipes: Vec<Receta>,
     recipe: usize,
@@ -117,6 +122,8 @@ pub struct MontajePane {
     parada: Parada,
     /// Settings' AI half, between publishes.
     ajustes: AjustesIa,
+    /// The agent asked for a montage to start once its turn is over.
+    correr_al_acabar: bool,
 }
 
 impl Default for MontajePane {
@@ -128,6 +135,7 @@ impl Default for MontajePane {
             step: 0,
             material: String::new(),
             material_note: String::new(),
+            script_note: String::new(),
             recipes: with_automatic(receta::de_serie()),
             recipe: 0,
             request: String::new(),
@@ -147,6 +155,7 @@ impl Default for MontajePane {
             error: String::new(),
             parada: Parada::default(),
             ajustes: AjustesIa::default(),
+            correr_al_acabar: false,
         }
     }
 }
@@ -353,6 +362,7 @@ impl MontajePane {
 
     fn set_material(&mut self, material: String) {
         self.material_note = material_note(&material);
+        self.script_note = script_note(&material);
         self.material = material;
     }
 
@@ -657,6 +667,7 @@ impl MontajePane {
             language: self.language,
             captions: self.captions,
             script: self.script.as_str().into(),
+            script_note: self.script_note.as_str().into(),
             models_ok: models_missing.is_none(),
             models_note: models_missing.unwrap_or_default().into(),
             busy: self.busy,
@@ -721,10 +732,10 @@ const IMAGE: [&str; 5] = ["jpg", "jpeg", "png", "webp", "heic"];
 const AUDIO: [&str; 6] = ["mp3", "m4a", "wav", "aac", "ogg", "flac"];
 const DOCUMENT: [&str; 3] = ["docx", "txt", "md"];
 
-/// How many videos, photos, audio files and documents a folder holds,
-/// subfolders included, as the listing reads it.
-fn contar(folder: &Path) -> (usize, usize, usize, usize) {
-    let mut cuenta = (0, 0, 0, 0);
+/// The files in a folder, subfolders included, four levels down at most,
+/// with their extensions in lower case.
+fn archivos(folder: &Path) -> Vec<(PathBuf, String)> {
+    let mut archivos = Vec::new();
     let mut pendientes = vec![(folder.to_path_buf(), 0)];
     while let Some((dir, depth)) = pendientes.pop() {
         for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -739,19 +750,54 @@ fn contar(folder: &Path) -> (usize, usize, usize, usize) {
                 .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
-            let ext = ext.as_str();
-            if VIDEO.contains(&ext) {
-                cuenta.0 += 1;
-            } else if IMAGE.contains(&ext) {
-                cuenta.1 += 1;
-            } else if AUDIO.contains(&ext) {
-                cuenta.2 += 1;
-            } else if DOCUMENT.contains(&ext) {
-                cuenta.3 += 1;
-            }
+            archivos.push((path, ext));
+        }
+    }
+    archivos
+}
+
+/// How many videos, photos, audio files and documents a folder holds,
+/// subfolders included, as the listing reads it.
+fn contar(folder: &Path) -> (usize, usize, usize, usize) {
+    let mut cuenta = (0, 0, 0, 0);
+    for (_, ext) in archivos(folder) {
+        let ext = ext.as_str();
+        if VIDEO.contains(&ext) {
+            cuenta.0 += 1;
+        } else if IMAGE.contains(&ext) {
+            cuenta.1 += 1;
+        } else if AUDIO.contains(&ext) {
+            cuenta.2 += 1;
+        } else if DOCUMENT.contains(&ext) {
+            cuenta.3 += 1;
         }
     }
     cuenta
+}
+
+/// The names of the documents in a folder, in order.
+fn documentos(folder: &Path) -> Vec<String> {
+    let mut nombres: Vec<String> = archivos(folder)
+        .into_iter()
+        .filter(|(_, ext)| DOCUMENT.contains(&ext.as_str()))
+        .filter_map(|(path, _)| Some(path.file_name()?.to_string_lossy().into_owned()))
+        .collect();
+    nombres.sort();
+    nombres
+}
+
+/// The line in the script row when no script is chosen: the documents
+/// the material already brings, which the AI reads; empty when none.
+fn script_note(material: &str) -> String {
+    let folder = Path::new(material.trim());
+    if material.trim().is_empty() || !folder.is_dir() {
+        return String::new();
+    }
+    let nombres = documentos(folder);
+    if nombres.is_empty() {
+        return String::new();
+    }
+    tf("montaje.scriptInMaterial", &[&nombres.join(", ")])
 }
 
 /// The line under the material field.
@@ -778,6 +824,26 @@ fn material_note(material: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The documents a material folder brings are named, sorted, in the
+    /// script row; a folder without any leaves the row to say "no script".
+    #[test]
+    fn the_script_row_names_the_documents_in_the_material() {
+        let raiz = std::env::temp_dir().join(format!("concat-guion-{}", std::process::id()));
+        let notas = raiz.join("notas");
+        std::fs::create_dir_all(&notas).unwrap();
+        for nombre in ["toma.mov", "GIDOIA.docx", "notas/Subtitulos.DOCX"] {
+            std::fs::write(raiz.join(nombre), b"").unwrap();
+        }
+        assert_eq!(documentos(&raiz), ["GIDOIA.docx", "Subtitulos.DOCX"]);
+        assert!(!script_note(&raiz.to_string_lossy()).is_empty());
+
+        std::fs::remove_file(raiz.join("GIDOIA.docx")).unwrap();
+        std::fs::remove_file(notas.join("Subtitulos.DOCX")).unwrap();
+        assert_eq!(script_note(&raiz.to_string_lossy()), "");
+        assert_eq!(script_note(""), "");
+        std::fs::remove_dir_all(&raiz).unwrap();
+    }
 
     /// Opened again over the project it was filled in for, the sheet keeps
     /// its edits; over another project it is filled in afresh.

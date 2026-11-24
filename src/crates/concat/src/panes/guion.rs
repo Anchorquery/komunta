@@ -23,6 +23,7 @@ use montaje::guion::{self, Tipo};
 use montaje::revision::Aviso;
 use montaje::entrada::Plan;
 use montaje::{Encargo, Guion, PlanCrudo, Trabajo};
+
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::i18n::{t, tf};
@@ -31,6 +32,8 @@ use crate::studio::Studio;
 use crate::ui::{
     App, GuionBlockData, GuionChipData, GuionPanel, GuionRowData, GuionWarningData, GuionWordData,
 };
+
+pub(crate) mod asistente;
 
 /// Everything that can happen to the script.
 #[derive(Debug)]
@@ -76,6 +79,8 @@ pub struct GuionPane {
     /// caret.
     revision: u64,
     published: Cell<u64>,
+    /// The agent asked for the script to be applied once its turn is over.
+    aplicar_al_acabar: bool,
 }
 
 impl Default for GuionPane {
@@ -94,6 +99,7 @@ impl Default for GuionPane {
             status: String::new(),
             revision: 1,
             published: Cell::new(0),
+            aplicar_al_acabar: false,
         }
     }
 }
@@ -418,9 +424,13 @@ pub(crate) fn graft(
         .guardar(&proyecto)
         .map_err(|error| error.to_string())?;
     // What is on disk is the project with the new timelines; the session
-    // is let go without saving over it, and opened again.
+    // is let go without saving over it, and opened again. The chat is about
+    // this same project, so it stays.
+    let chat = std::mem::take(&mut studio.asistente);
     studio.release_project();
-    projects::open(&path).and_then(|info| studio.open_project(info))
+    let abierto = projects::open(&path).and_then(|info| studio.open_project(info));
+    studio.asistente = chat;
+    abierto
 }
 
 fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {

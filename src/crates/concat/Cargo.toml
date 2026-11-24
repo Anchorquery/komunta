@@ -145,6 +145,11 @@ montaje = { path = "../montaje", features = ["sonda"] }
 # The montage's analysis of the clips - whisper, the voice detector and
 # YuNet - run here before the engine.
 analisis = { path = "../analisis", features = ["describir", "escucha", "vision"] }
+# The assistant's conversation and its AI; its tools are concat-mcp's, run
+# on the project on screen.
+asistente = { path = "../asistente", features = ["genai", "acp"] }
+# Animation recipes: the zoom, the animated title, the copy of a clip.
+animacion = { path = "../animacion" }
 concat-export.workspace = true
 concat-host = { workspace = true, features = ["gpu"] }
 concat-speech = { workspace = true, features = ["chatterbox"] }

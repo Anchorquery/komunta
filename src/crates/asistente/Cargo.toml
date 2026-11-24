@@ -1,0 +1,29 @@
+[package]
+name = "asistente"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Komunta: the in-window AI assistant's conversation - a provider asked in turns, the tools it calls run between them - apart from any window, so it is tested without one."
+
+[dependencies]
+# Gemini over HTTP, with its quota and its fallback models.
+analisis = { path = "../analisis", default-features = false, features = ["gemini"] }
+base64 = "0.22"
+log = "0.4"
+serde_json.workspace = true
+# Every other provider - Claude, GPT, Ollama, Groq... - through genai's
+# adapters, which keep thought signatures across tool turns.
+genai = { version = "0.7.4", optional = true }
+tokio = { version = "1", features = ["rt", "time"], optional = true }
+# Someone else's agent - Gemini CLI, Claude Code, Codex - over the Agent
+# Client Protocol, as a process of its own.
+agent-client-protocol = { version = "5.2", features = ["process"], optional = true }
+futures = { version = "0.3", features = ["executor"], optional = true }
+
+[features]
+genai = ["dep:genai", "dep:tokio"]
+acp = ["dep:agent-client-protocol", "dep:futures"]
+
+[lints]
+workspace = true

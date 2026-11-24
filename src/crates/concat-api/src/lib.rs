@@ -29,6 +29,7 @@
 //! with, from that thread, which is why the sink must be `Send + Sync`.
 
 mod job;
+pub mod live;
 pub mod message;
 pub mod rpc;
 
@@ -52,6 +53,7 @@ use concat_host::{ProjectInfo, Session, Titles, lock, media, projects};
 use concat_project::Command;
 use concat_project::model::VideoSettings;
 
+pub use live::{LiveSwitch, LiveWindow};
 pub use message::{
     API_VERSION, ApiError, Dirs, Done, ErrorCode, Event, ExportSpec, Fill, JobState, JobStatus,
     PackageInfo, ParamInfo, Picture, Reply, Request, Response, Started, VersionInfo, Written,
@@ -231,6 +233,9 @@ pub struct Api {
     /// Which project folders are open on this machine, across this API
     /// and a window it is embedded in.
     open: OpenProjects,
+    /// The window and its live-mode switch, when this API is embedded in
+    /// one (#337).
+    live: Option<(Arc<dyn LiveWindow>, LiveSwitch)>,
     titles: Titles,
     cutouts: Arc<Cutouts>,
     stabilizers: Arc<Stabilizers>,
@@ -298,6 +303,7 @@ impl Api {
             sessions: BTreeMap::new(),
             roots: Vec::new(),
             open: OpenProjects::default(),
+            live: None,
             events,
             jobs: Jobs::default(),
             dirs,
@@ -355,6 +361,24 @@ impl Api {
     /// round.
     pub fn share_open_projects(&mut self, open: OpenProjects) {
         self.open = open;
+    }
+
+    /// Hands this API the window it is embedded in, for live mode: while
+    /// `switch` is on, a request that names the project the window holds
+    /// is the window's to run ([`live::live_path`]).
+    pub fn share_live_window(&mut self, window: Arc<dyn LiveWindow>, switch: LiveSwitch) {
+        self.live = Some((window, switch));
+    }
+
+    /// The window's reply to `request`, when live mode makes it the
+    /// window's.
+    fn live_call(&self, request: &Request) -> Option<Result<Reply, ApiError>> {
+        let (window, switch) = self.live.as_ref()?;
+        let path = live::live_path(request)?;
+        if !switch.is_on() || self.open.holder(path) != Some(Holder::Window) {
+            return None;
+        }
+        Some(window.call(request.clone()))
     }
 
     /// Confines every write to `roots`: from here on a created project, an
@@ -426,6 +450,9 @@ impl Api {
     /// it begins reports through the sink from then on.
     pub fn dispatch(&mut self, request: Request) -> Response {
         self.jobs.reap(&self.book);
+        if let Some(reply) = self.live_call(&request) {
+            return reply.into();
+        }
         self.run(request).into()
     }
 
@@ -826,14 +853,7 @@ impl Api {
         size: Option<(u32, u32)>,
     ) -> Result<Picture, ApiError> {
         let (width, height, pixels) = self.pixels(path, time, size)?;
-        let mut png = Vec::new();
-        encode_png(&mut png, width, height, &pixels)
-            .map_err(|error| ApiError::failed(format!("could not encode the frame: {error}")))?;
-        Ok(Picture {
-            width,
-            height,
-            png: base64::engine::general_purpose::STANDARD.encode(png),
-        })
+        Picture::from_rgba(width, height, &pixels)
     }
 
     /// The composited RGBA frame at `time`.
@@ -1010,7 +1030,7 @@ impl ExportJob {
 
 /// [`Request::CatalogueList`]: the built-in packages plus whatever
 /// [`Catalogue::install`] added, in id order.
-fn catalogue(kind: Option<&str>) -> Result<Vec<PackageInfo>, ApiError> {
+pub fn catalogue(kind: Option<&str>) -> Result<Vec<PackageInfo>, ApiError> {
     let kind = match kind {
         None => None,
         Some("effect") => Some(Kind::Effect),
@@ -1159,6 +1179,21 @@ fn write_png(output: &Path, width: u32, height: u32, pixels: &[u8]) -> Result<()
     let file = std::fs::File::create(output).map_err(|error| could_not(&error))?;
     encode_png(std::io::BufWriter::new(file), width, height, pixels)
         .map_err(|error| could_not(&error))
+}
+
+impl Picture {
+    /// RGBA pixels as the PNG a [`Reply::Picture`] carries: what the
+    /// window answers a live frame with, too.
+    pub fn from_rgba(width: u32, height: u32, pixels: &[u8]) -> Result<Picture, ApiError> {
+        let mut png = Vec::new();
+        encode_png(&mut png, width, height, pixels)
+            .map_err(|error| ApiError::failed(format!("could not encode the frame: {error}")))?;
+        Ok(Picture {
+            width,
+            height,
+            png: base64::engine::general_purpose::STANDARD.encode(png),
+        })
+    }
 }
 
 /// Encodes RGBA pixels as a PNG into `sink`.
@@ -1778,5 +1813,43 @@ mod tests {
             "{}",
             refused.message
         );
+    }
+
+    /// A window that answers every call with `Done`, and counts them.
+    #[derive(Default)]
+    struct Window(Mutex<Vec<Request>>);
+
+    impl LiveWindow for Window {
+        fn call(&self, request: Request) -> Result<Reply, ApiError> {
+            self.0.lock().expect("calls").push(request);
+            Ok(Reply::Done(Done {}))
+        }
+    }
+
+    #[test]
+    fn with_live_mode_on_the_window_s_project_is_the_window_s_to_edit() {
+        let (mut api, scratch, _events) = api();
+        let path = project(&mut api, &scratch, "Live");
+        ok(api.dispatch(Request::ProjectClose {
+            path: path.clone(),
+            save: false,
+        }));
+        let open = OpenProjects::default();
+        api.share_open_projects(open.clone());
+        open.claim(&path, Holder::Window).expect("the window has it");
+        let window = Arc::new(Window::default());
+        let switch = LiveSwitch::default();
+        api.share_live_window(window.clone(), switch.clone());
+        let undo = || Request::EditUndo { path: path.clone() };
+        assert_eq!(err(api.dispatch(undo())).code, ErrorCode::NotOpen, "off: not this API's");
+        switch.set(true);
+        assert!(matches!(ok(api.dispatch(undo())), Reply::Done(_)));
+        assert_eq!(window.0.lock().expect("calls").len(), 1);
+        let save = err(api.dispatch(Request::ProjectSave {
+            path: path.clone(),
+            name: None,
+        }));
+        assert_ne!(save.code, ErrorCode::Parse, "saving stays the person's: {}", save.message);
+        assert_eq!(window.0.lock().expect("calls").len(), 1);
     }
 }

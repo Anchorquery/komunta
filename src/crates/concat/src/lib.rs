@@ -34,6 +34,7 @@ mod ui {
 mod batch_volume;
 mod chips;
 mod dock;
+mod en_vivo;
 mod fonts;
 mod format;
 mod gpu;
@@ -93,6 +94,7 @@ mod wayland_drop {
 use dock::{Dock, SEAT_MIN_GRAB, SEAT_MIN_H, SEAT_MIN_W};
 use host::{Host, Shell};
 use panes::Msg;
+use panes::asistente::AsistenteMsg;
 use panes::captions::CaptionsMsg;
 use panes::export::ExportMsg;
 use panes::guion::GuionMsg;
@@ -715,6 +717,33 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     guion.on_dismiss(on_window!(|state| {
         state.handle(Msg::Montaje(MontajeMsg::Action("dismiss".to_owned())));
+    }));
+
+    // ── Komunta's assistant ──
+    app.on_asistente_toggle(on_window!(|state| {
+        state.handle(Msg::Asistente(AsistenteMsg::Toggle));
+    }));
+    let asistente = app.global::<AsistentePanel>();
+    asistente.on_resized(on_window!(|state, columns: i32| {
+        state.handle(Msg::Asistente(AsistenteMsg::Resized(columns)));
+    }));
+    asistente.on_send(on_window!(|state, text: SharedString| {
+        state.handle(Msg::Asistente(AsistenteMsg::Send(text.to_string())));
+    }));
+    asistente.on_clear(on_window!(|state| {
+        state.handle(Msg::Asistente(AsistenteMsg::Clear));
+    }));
+    asistente.on_answer(on_window!(|state, yes: bool| {
+        state.handle(Msg::Asistente(AsistenteMsg::Answer(yes)));
+    }));
+    asistente.on_stop(on_window!(|state| {
+        state.handle(Msg::Asistente(AsistenteMsg::Stop));
+    }));
+    asistente.on_agent_chosen(on_window!(|state, index: i32| {
+        state.handle(Msg::Asistente(AsistenteMsg::AgentChosen(index)));
+    }));
+    asistente.on_option_chosen(on_window!(|state, option: i32, value: i32| {
+        state.handle(Msg::Asistente(AsistenteMsg::OptionChosen(option, value)));
     }));
 
     // ── the launch screen ──
@@ -2004,6 +2033,12 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         state.handle(Msg::Settings(SettingsMsg::DownloadBaseEdited(
             text.to_string(),
         )));
+    }));
+    app.on_settings_panel_agent_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Settings(SettingsMsg::PanelAgentChanged(index)));
+    }));
+    app.on_settings_live_enabled_changed(on_window!(|state, on: bool| {
+        state.handle(Msg::Settings(SettingsMsg::LiveEnabledChanged(on)));
     }));
     app.on_settings_server_enabled_changed(on_window!(|state, on: bool| {
         state.handle(Msg::Settings(SettingsMsg::ServerEnabledChanged(on)));

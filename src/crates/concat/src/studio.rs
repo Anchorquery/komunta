@@ -42,8 +42,10 @@ use concat_project::commands::{ClipMove, ClipPatch, TrackFlag, TrimEdge};
 use concat_project::model::{
     self, AppliedFilter, Clip, Project, TextAlign, TextStyle, Timeline, Track, Transition,
 };
+use animacion::copia::comandos as copy_commands;
 use concat_project::{Command, PlayheadSide};
 
+mod asistente;
 mod backdrop;
 mod consolidate;
 use consolidate::MergeJob;
@@ -891,6 +893,7 @@ pub struct Studio {
     pub montaje: crate::panes::montaje::MontajePane,
     /// Komunta's Montaje pane: the montage's script.
     pub guion: crate::panes::guion::GuionPane,
+    pub asistente: crate::panes::asistente::AsistentePane,
     pub recents: Vec<projects::Recent>,
     pub posters: HashMap<String, slint::Image>,
     posters_pending: HashSet<String>,
@@ -2074,96 +2077,6 @@ pub struct Held {
     pub clip: Clip,
 }
 
-/// The edits that make `placed` - the whole of `source`'s file, just laid
-/// on a free stretch of the lane - into a copy of `source` at `start` on
-/// `track_id`: its frames, speed, placement, keys and mix.
-///
-/// The footage is trimmed at normal speed to what the source covers, then
-/// retimed - the speed command keeps the footage covered and recomputes
-/// the length - and only then moved to `start`, so neighbours there never
-/// push the whole file aside and shift the frames the trims cut.
-fn copy_commands(source: &Clip, placed: &Clip, track_id: &str, start: f64) -> Vec<Command> {
-    let created = &placed.id;
-    let mut commands = Vec::new();
-    let head = source.source_start - placed.source_start;
-    if head.abs() > 1e-6 {
-        commands.push(Command::TrimClip {
-            clip_id: created.clone(),
-            edge: TrimEdge::Start,
-            delta: head,
-            ripple: false,
-        });
-    }
-    // The footage the source covers, at normal speed.
-    let covered = source.duration * source.speed;
-    let tail = covered - (placed.duration - head);
-    if tail.abs() > 1e-6 {
-        commands.push(Command::TrimClip {
-            clip_id: created.clone(),
-            edge: TrimEdge::End,
-            delta: tail,
-            ripple: false,
-        });
-    }
-    if (source.speed - 1.0).abs() > 1e-9 {
-        commands.push(Command::SetClipSpeed {
-            clip_id: created.clone(),
-            speed: source.speed,
-        });
-    }
-    if source.speed_curve.is_some() {
-        commands.push(Command::SetClipSpeedCurve {
-            clip_id: created.clone(),
-            curve: source.speed_curve.clone(),
-        });
-    }
-    commands.push(Command::MoveClips {
-        moves: vec![ClipMove {
-            clip_id: created.clone(),
-            start,
-            track_id: track_id.to_owned(),
-        }],
-    });
-    commands.push(Command::SetClipTransform {
-        clip_id: created.clone(),
-        scale: Some(source.scale),
-        offset_x: Some(source.offset_x),
-        offset_y: Some(source.offset_y),
-        rotation: Some(source.rotation),
-        stretch_x: Some(source.stretch_x),
-        stretch_y: Some(source.stretch_y),
-    });
-    for key in &source.keys {
-        commands.push(Command::SetClipKey {
-            clip_id: created.clone(),
-            property: key.property,
-            at: key.at,
-            value: key.value,
-            ease: key.ease,
-        });
-    }
-    commands.push(Command::UpdateClip {
-        clip_id: created.clone(),
-        patch: ClipPatch {
-            name: Some(format!("{} copy", source.name)),
-            volume: Some(source.volume),
-            fade_in: Some(source.fade_in),
-            fade_out: Some(source.fade_out),
-            opacity: Some(source.opacity),
-            preserve_pitch: Some(source.preserve_pitch),
-            muted: source.muted,
-            flip_h: Some(source.flip_h),
-            flip_v: Some(source.flip_v),
-            blend: Some(source.blend.clone()),
-            crop: Some(source.crop),
-            filters: Some(source.filters.clone()),
-            video_effects: Some(source.video_effects.clone()),
-            ..ClipPatch::default()
-        },
-    });
-    commands
-}
-
 /// Where each held clip lands: `(row, start)` per clip in the order held,
 /// or `None` for one with no lane to land on. The group keeps its shape,
 /// every clip the same distance from the earliest as when copied, from
@@ -2305,6 +2218,7 @@ impl Studio {
             start,
             montaje: Default::default(),
             guion: Default::default(),
+            asistente: Default::default(),
             recents,
             posters: HashMap::new(),
             posters_pending: HashSet::new(),
@@ -8332,6 +8246,7 @@ impl Studio {
     /// the save has landed, and what quitting without saving does instead.
     pub(crate) fn release_project(&mut self) {
         self.guion = Default::default();
+        self.asistente.olvidar();
         self.host.cutouts.cancel();
         self.host.stabilizers.cancel();
         self.host.enhancers.cancel();
@@ -8489,6 +8404,11 @@ impl Studio {
                 let mut pane = std::mem::take(&mut self.guion);
                 pane.update(msg, self);
                 self.guion = pane;
+            }
+            crate::panes::Msg::Asistente(msg) => {
+                let mut pane = std::mem::take(&mut self.asistente);
+                pane.update(msg, self);
+                self.asistente = pane;
             }
             crate::panes::Msg::Media(msg) => {
                 let mut pane = std::mem::take(&mut self.media);
@@ -10753,6 +10673,7 @@ impl Studio {
         app.set_montaje(self.montaje.data(self));
         app.set_montaje_settings(self.montaje.settings_data(self));
         self.guion.publish(app);
+        self.asistente.publish(app);
         self.montaje.publish_run(app);
         app.set_recents_total(self.recents.len() as i32);
         sync(

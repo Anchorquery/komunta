@@ -8,6 +8,7 @@
 //! (the AI's notes, the template's name) survive a save. Every save keeps
 //! the previous plan as a version, the way the engine's `edicion.py` does.
 
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -258,29 +259,27 @@ impl PlanCrudo {
         let Some(t) = self.lista("tomas").get_mut(toma) else {
             return;
         };
-        let mut fuera: Vec<usize> = t["quitar"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|r| Some((r[0].as_u64()? as usize)..=(r[1].as_u64()? as usize)))
-            .flatten()
-            .collect();
+        let mut fuera = quitadas(t);
         if fuera.contains(&i) {
             fuera.retain(|&w| w != i);
         } else {
             fuera.push(i);
         }
-        fuera.sort_unstable();
-        fuera.dedup();
-        // Back into ranges, runs of neighbours joined.
-        let mut rangos: Vec<[usize; 2]> = Vec::new();
-        for w in fuera {
-            match rangos.last_mut() {
-                Some(r) if r[1] + 1 == w => r[1] = w,
-                _ => rangos.push([w, w]),
-            }
+        t["quitar"] = json!(en_rangos(fuera));
+    }
+
+    /// Cuts the words `palabras` of take `toma` out (`quitar`) or puts them
+    /// all back, whatever each was before.
+    pub fn marcar_palabras(&mut self, toma: usize, palabras: RangeInclusive<usize>, quitar: bool) {
+        let Some(t) = self.lista("tomas").get_mut(toma) else {
+            return;
+        };
+        let mut fuera = quitadas(t);
+        fuera.retain(|w| !palabras.contains(w));
+        if quitar {
+            fuera.extend(palabras);
         }
-        t["quitar"] = json!(rangos);
+        t["quitar"] = json!(en_rangos(fuera));
     }
 
     /// Removes take `toma`, with the captions and B-roll anchored to it.
@@ -421,6 +420,31 @@ impl PlanCrudo {
     }
 }
 
+/// The words a take has cut out, one by one.
+fn quitadas(toma: &Value) -> Vec<usize> {
+    toma["quitar"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| Some((r[0].as_u64()? as usize)..=(r[1].as_u64()? as usize)))
+        .flatten()
+        .collect()
+}
+
+/// Words back into ranges, runs of neighbours joined.
+fn en_rangos(mut palabras: Vec<usize>) -> Vec<[usize; 2]> {
+    palabras.sort_unstable();
+    palabras.dedup();
+    let mut rangos: Vec<[usize; 2]> = Vec::new();
+    for w in palabras {
+        match rangos.last_mut() {
+            Some(r) if r[1] + 1 == w => r[1] = w,
+            _ => rangos.push([w, w]),
+        }
+    }
+    rangos
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +481,17 @@ mod tests {
         p.alternar_palabra(1, 2);
         assert_eq!(p.0["tomas"][1]["quitar"], json!([[3, 4]]));
         assert_eq!(p.0["plantilla"], "mensaje_a_camara");
+    }
+
+    #[test]
+    fn a_run_of_words_is_struck_or_put_back_at_once() {
+        let mut p = plan();
+        p.marcar_palabras(1, 1..=2, true);
+        assert_eq!(p.0["tomas"][1]["quitar"], json!([[1, 3]]));
+        p.marcar_palabras(1, 3..=5, false);
+        assert_eq!(p.0["tomas"][1]["quitar"], json!([[1, 2]]));
+        p.marcar_palabras(9, 0..=1, true);
+        assert_eq!(p.0["tomas"].as_array().unwrap().len(), 3);
     }
 
     /// A word struck and put back leaves the JSON with an empty list where

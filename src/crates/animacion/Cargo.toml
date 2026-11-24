@@ -1,0 +1,16 @@
+[package]
+name = "animacion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Komunta: animation recipes - a zoom on a phrase, a title that comes in with a style - as the editor commands that make them, pure functions of the clip they act on, so the agent, the montage and the window share one way of doing each."
+
+[dependencies]
+concat-project.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -412,13 +412,14 @@ impl Dock {
     }
 }
 
-const PANES: [(PaneKind, &str); 6] = [
+const PANES: [(PaneKind, &str); 7] = [
     (PaneKind::Media, "media"),
     (PaneKind::Preview, "preview"),
     (PaneKind::Inspector, "inspector"),
     (PaneKind::Timeline, "timeline"),
     (PaneKind::Keyframes, "keyframes"),
     (PaneKind::Guion, "guion"),
+    (PaneKind::Asistente, "asistente"),
 ];
 
 fn pane_name(kind: PaneKind) -> &'static str {

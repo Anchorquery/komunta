@@ -14,6 +14,16 @@
 //! The panes move here one at a time from the window's controller; the
 //! export sheet is the first, and the shape the rest follow.
 
+pub mod asistente;
+pub mod asistente_catalogo;
+pub mod asistente_externo;
+pub mod asistente_guion;
+pub mod asistente_ia;
+pub mod asistente_montaje;
+pub mod asistente_opciones;
+pub mod asistente_persona;
+pub mod asistente_recetas;
+pub mod asistente_vivo;
 pub mod captions;
 pub mod export;
 pub mod glide;
@@ -67,6 +77,8 @@ pub enum Msg {
     Montaje(montaje::MontajeMsg),
     /// To Komunta's "Guion de montaje" pane.
     Guion(guion::GuionMsg),
+    /// To Komunta's assistant.
+    Asistente(asistente::AsistenteMsg),
 }
 
 /// What a message says in the log: the activity trail of what the person
@@ -77,6 +89,7 @@ pub enum Msg {
 /// project's name, a server's token - and an outcome by its path or its
 /// count rather than its data.
 pub fn activity(msg: &Msg) -> Option<Activity> {
+    use asistente::AsistenteMsg;
     use captions::CaptionsMsg;
     use export::ExportMsg;
     use guion::GuionMsg;
@@ -102,6 +115,7 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
         | Msg::Speech(SpeechMsg::Progress(_))
         | Msg::Montaje(MontajeMsg::Progress(_))
         | Msg::Guion(GuionMsg::Resized(_))
+        | Msg::Asistente(AsistenteMsg::Resized(_) | AsistenteMsg::Event(_))
         | Msg::Settings(SettingsMsg::ModelProgress { .. } | SettingsMsg::InstallProgress { .. }) => {
             return None;
         }
@@ -133,6 +147,22 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
                         format!("guion: laid out, {} timelines", project.timelines.len())
                     }
                     Err(error) => format!("guion: failed, {error}"),
+                },
+            ));
+        }
+        // What the person writes to the AI is theirs, and not for the log.
+        Msg::Asistente(AsistenteMsg::Send(texto)) => {
+            return Some(Activity::once(
+                Info,
+                format!("asistente: sent, {} characters", texto.chars().count()),
+            ));
+        }
+        Msg::Asistente(AsistenteMsg::Finished(_, _, resultado)) => {
+            return Some(Activity::once(
+                Info,
+                match resultado {
+                    Ok(fin) => format!("asistente: turn done, {fin:?}"),
+                    Err(error) => format!("asistente: turn failed, {error}"),
                 },
             ));
         }

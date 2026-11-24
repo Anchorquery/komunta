@@ -104,6 +104,34 @@ fn clasificar(fallo: &Fallo) -> Clase {
     }
 }
 
+/// How long to wait before trying again: an overloaded model, and a round
+/// of every model when they all are.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ritmo {
+    /// Before each further try of an overloaded model, in seconds; once
+    /// these are used up the next model is asked.
+    pub saturado: &'static [u64],
+    /// Before each round of every model, in seconds; the first is
+    /// usually 0.
+    pub rondas: &'static [u64],
+}
+
+impl Ritmo {
+    /// A job that may wait - a description, a plan: one more try 8 s
+    /// later, and the round again after 30 s and 90 s.
+    pub const PACIENTE: Ritmo = Ritmo {
+        saturado: &[8],
+        rondas: &[0, 30, 90],
+    };
+
+    /// A person waiting in a chat: tries again after 1 s and 3 s, then the
+    /// next model, and one round only.
+    pub const CONVERSACION: Ritmo = Ritmo {
+        saturado: &[1, 3],
+        rondas: &[0],
+    };
+}
+
 /// Calls `llamada` with each of `modelos` in turn until one answers,
 /// counting every attempt in `cuota`; `dormir` waits. A model out of
 /// today's quota is marked and skipped; a per-minute limit is waited out
@@ -113,12 +141,23 @@ fn clasificar(fallo: &Fallo) -> Clase {
 pub fn con_reintentos<T>(
     cuota: &Cuota,
     modelos: &[String],
+    llamada: impl FnMut(&str) -> Result<T, Fallo>,
+    dormir: impl FnMut(Duration),
+) -> Result<T, ErrorGemini> {
+    con_ritmo(cuota, modelos, Ritmo::PACIENTE, llamada, dormir)
+}
+
+/// [`con_reintentos`] waiting as `ritmo` says.
+pub fn con_ritmo<T>(
+    cuota: &Cuota,
+    modelos: &[String],
+    ritmo: Ritmo,
     mut llamada: impl FnMut(&str) -> Result<T, Fallo>,
     mut dormir: impl FnMut(Duration),
 ) -> Result<T, ErrorGemini> {
     let mut mudos: Vec<&str> = Vec::new();
     let mut sin_respuesta = String::new();
-    for espera in [0, 30, 90] {
+    for &espera in ritmo.rondas {
         let vivos: Vec<&String> = modelos
             .iter()
             .filter(|m| !cuota.agotado(m) && !mudos.contains(&m.as_str()))
@@ -129,7 +168,7 @@ pub fn con_reintentos<T>(
         dormir(Duration::from_secs(espera));
         for modelo in vivos {
             let mut intento = 0;
-            while intento < 3 {
+            while intento < (ritmo.saturado.len() + 1).max(3) {
                 intento += 1;
                 cuota.registrar(modelo);
                 let fallo = match llamada(modelo) {
@@ -144,8 +183,10 @@ pub fn con_reintentos<T>(
                         break;
                     }
                     Clase::LimitePorMinuto => dormir(cuota::espera_por_minuto(&fallo.texto)),
-                    Clase::Saturado if intento == 1 => dormir(Duration::from_secs(8)),
-                    Clase::Saturado => break,
+                    Clase::Saturado => match ritmo.saturado.get(intento - 1) {
+                        Some(&segundos) => dormir(Duration::from_secs(segundos)),
+                        None => break,
+                    },
                     Clase::SinRespuesta => {
                         mudos.push(modelo);
                         sin_respuesta = recortar(&fallo.texto);
@@ -219,7 +260,12 @@ impl Gemini {
     /// `{"role", "parts"}` - under `generationConfig` `ajustes`; returns
     /// Google's whole answer ([`texto_de`] reads it).
     pub fn conversar(&self, modelo: &str, turnos: &[Value], ajustes: Value) -> Result<Value, Fallo> {
-        let cuerpo = json!({"contents": turnos, "generationConfig": ajustes});
+        self.pedir(modelo, &json!({"contents": turnos, "generationConfig": ajustes}))
+    }
+
+    /// Sends `cuerpo`, a whole `generateContent` request - with tools or
+    /// a system instruction, say - to `modelo`; returns Google's answer.
+    pub fn pedir(&self, modelo: &str, cuerpo: &Value) -> Result<Value, Fallo> {
         self.agente
             .post(&format!("{API}/v1beta/models/{modelo}:generateContent"))
             .set("x-goog-api-key", &self.clave)
@@ -368,6 +414,30 @@ mod tests {
         assert_eq!(respuesta, Err(ErrorGemini::Saturado));
         assert_eq!(*intentos.borrow(), 6);
         assert_eq!(*esperas.borrow(), [0, 8, 30, 8, 90, 8]);
+    }
+
+    #[test]
+    fn a_chat_tries_an_overloaded_model_after_one_and_three_seconds_then_the_next() {
+        let cuota = cuota("conversacion");
+        let modelos = ["flash".to_owned(), "lite".to_owned()];
+        let pedidos = RefCell::new(Vec::new());
+        let esperas = RefCell::new(Vec::new());
+        let respuesta = con_ritmo(
+            &cuota,
+            &modelos,
+            Ritmo::CONVERSACION,
+            |modelo| {
+                pedidos.borrow_mut().push(modelo.to_owned());
+                match modelo {
+                    "flash" => Err(fallo(503, "high demand")),
+                    _ => Ok("hecho"),
+                }
+            },
+            |espera| esperas.borrow_mut().push(espera.as_secs()),
+        );
+        assert_eq!(respuesta, Ok("hecho"));
+        assert_eq!(*pedidos.borrow(), ["flash", "flash", "flash", "lite"]);
+        assert_eq!(*esperas.borrow(), [0, 1, 3]);
     }
 
     fn sin_respuesta() -> Fallo {

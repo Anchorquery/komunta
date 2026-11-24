@@ -59,6 +59,9 @@ pub struct Host {
     pub server: Option<concat_server::Server>,
     /// Which project folders are open, here or over the socket.
     pub open_projects: concat_api::OpenProjects,
+    /// Live mode (#337): while on, a caller on the socket edits the
+    /// project on screen through the window rather than being refused.
+    pub live: concat_api::LiveSwitch,
 }
 
 impl Host {
@@ -86,6 +89,7 @@ impl Host {
             transcriber: Arc::new(Transcriber::new()),
             speech: Arc::new(Speech::new()),
             server: None,
+            live: concat_api::LiveSwitch::default(),
             open_projects: concat_api::OpenProjects::default(),
         })
     }

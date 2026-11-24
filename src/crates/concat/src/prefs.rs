@@ -131,6 +131,19 @@ pub struct Preferences {
     /// Komunta's montage engine: Settings › Montaje e IA.
     #[serde(default)]
     pub montaje: MontajePrefs,
+    /// What the assistant's own agent runs on, as chosen under its field.
+    #[serde(default)]
+    pub asistente: AsistentePrefs,
+}
+
+/// The model and the thinking chosen under the assistant's field.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AsistentePrefs {
+    /// The model asked first; empty is the automatic order.
+    pub model: String,
+    /// How much it thinks: "low", "medium" or "high"; empty is low.
+    pub effort: String,
 }
 
 /// Which AI does what in Komunta's montage, and where the Python engine
@@ -257,6 +270,12 @@ pub struct ServerPrefs {
     /// What a connection presents first. Empty means none, which the
     /// server only allows on loopback.
     pub token: String,
+    /// Live mode (#337): a caller edits the project on screen, through
+    /// the window. Off unless the person turns it on.
+    pub live: bool,
+    /// The agent in the assistant's pane: empty for Komunta's own, or the
+    /// id of an outside one (`panes::asistente_externo::AGENTES`).
+    pub agent: String,
 }
 
 impl Default for ServerPrefs {
@@ -265,6 +284,8 @@ impl Default for ServerPrefs {
             enabled: false,
             listen: DEFAULT_LISTEN.to_owned(),
             token: String::new(),
+            live: false,
+            agent: String::new(),
         }
     }
 }

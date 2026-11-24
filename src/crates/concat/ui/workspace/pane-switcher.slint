@@ -41,6 +41,8 @@ export enum PaneKind {
     keyframes,
     /// Komunta: the montage's plan, read as a script
     guion,
+    /// Komunta: a chat with an AI that edits the project
+    asistente,
 }
 
 export global Panes {
@@ -63,6 +65,7 @@ export global Panes {
             : kind == PaneKind.inspector ? I18n.t("paneSwitcher.inspector")
             : kind == PaneKind.keyframes ? I18n.t("common.keyframes")
             : kind == PaneKind.guion ? I18n.t("guion.title")
+            : kind == PaneKind.asistente ? I18n.t("asistente.title")
             : I18n.t("paneSwitcher.timeline");
     }
 
@@ -75,6 +78,7 @@ export global Panes {
             : kind == PaneKind.inspector ? "inspector"
             : kind == PaneKind.keyframes ? "keyframes"
             : kind == PaneKind.guion ? "guion"
+            : kind == PaneKind.asistente ? "asistente"
             : "timeline";
     }
 
@@ -88,6 +92,7 @@ export global Panes {
             : kind == PaneKind.inspector ? Glyph.settings
             : kind == PaneKind.keyframes ? Glyph.keyframe
             : kind == PaneKind.guion ? Glyph.book
+            : kind == PaneKind.asistente ? Glyph.chat
             : Glyph.rows;
     }
 }
@@ -409,6 +414,11 @@ export component PaneSwitcher inherits Rectangle {
                         current: root.kind == PaneKind.guion;
                         chosen => { menu.close(); root.picked(PaneKind.guion); }
                     }
+                    SwitchRow {
+                        kind: PaneKind.asistente;
+                        current: root.kind == PaneKind.asistente;
+                        chosen => { menu.close(); root.picked(PaneKind.asistente); }
+                    }
 
                     SwitchDivider { }
 
@@ -514,6 +524,10 @@ export component AddPaneButton inherits Rectangle {
                     SwitchRow {
                         kind: PaneKind.guion;
                         chosen => { menu.close(); root.added(PaneKind.guion); }
+                    }
+                    SwitchRow {
+                        kind: PaneKind.asistente;
+                        chosen => { menu.close(); root.added(PaneKind.asistente); }
                     }
                 }
             }

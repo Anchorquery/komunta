@@ -150,6 +150,8 @@ export component TitleBar inherits Rectangle {
     callback export-clicked();
     /// Komunta: "Armar montaje", the AI montage wizard over the project.
     callback montage-clicked();
+    /// Komunta: the assistant's chat, shown or put away.
+    callback assistant-clicked();
 
     height: 32px;
     // The window's ground, not a panel's: the strip is the frame the panes
@@ -314,6 +316,16 @@ export component TitleBar inherits Rectangle {
                     mouse-cursor: pointer;
                     clicked => { root.montage-clicked(); }
                 }
+            }
+        }
+
+        // Komunta: the assistant, beside the montage.
+        if !root.minimal: VerticalLayout {
+            alignment: center;
+            padding-left: 4px;
+            HeaderIconButton {
+                glyph: Glyph.chat;
+                clicked => { root.assistant-clicked(); }
             }
         }
 

@@ -360,6 +360,8 @@ Las CLIs no usan clave: usan la sesión iniciada de cada una (`claude auth login
 
 F0 desbloquea todo. F3 y F4 se apoyan en lo que ya hay en `montaje` y en los paneles Montaje y Guion.
 
+**Estado (2026-11-24, rama `panel-agente`).** F0, F1 (con Gemini en vez de Anthropic) y F2 (Gemini propio; el resto por genai) están; F5, los CLIs por ACP, sin el dictado. F3: hechas `guion_leer`, palabras por tramos, quitar y mover tomas, cambiar y quitar subtítulos, quitar recursos, descartar, versiones, volver y aplicar; faltan añadir subtítulos o recursos, estilos, garabatos y música. F4: estado, recetas y kits para elegir, lanzar (hacer o rehacer) y cancelar; faltan `proyecto_nuevo`, `que_quieres_redactar` y editar recetas y kits. F6 sin empezar: necesita gastar API. El detalle, en `agente-komunta.md`.
+
 ---
 
 ## 11. Riesgos y preguntas abiertas
