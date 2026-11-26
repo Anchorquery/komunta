@@ -443,6 +443,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "the ONNX Runtime download failed" }
           Expand-Archive onnxruntime.zip -DestinationPath .
           $dir = "$PWD\onnxruntime-${{ matrix.ort }}-$env:ORT_VERSION"
+          # From NuGet (deps.lock says why) the files sit under
+          # runtimes/<rid>/native: laid out as the release zip had them.
+          $native = "$PWD\runtimes\${{ matrix.ort }}\native"
+          if (Test-Path $native) {
+            New-Item -ItemType Directory -Force "$dir\lib" | Out-Null
+            Copy-Item "$native\*" "$dir\lib"
+          }
           if (-not (Test-Path "$dir\lib\onnxruntime.lib")) { throw "$dir\lib\onnxruntime.lib is not there" }
           if (-not (Test-Path "$dir\lib\onnxruntime.dll")) { throw "$dir\lib\onnxruntime.dll is not there" }
           "ORT_LIB_LOCATION=$dir\lib" | Out-File -FilePath $env:GITHUB_ENV -Append
