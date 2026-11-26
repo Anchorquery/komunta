@@ -441,12 +441,17 @@ jobs:
           $ErrorActionPreference = "Stop"
           & "$env:ProgramFiles\Git\bin\bash.exe" scripts/ci/fetch.sh "onnxruntime-${{ matrix.ort }}" onnxruntime.zip
           if ($LASTEXITCODE -ne 0) { throw "the ONNX Runtime download failed" }
-          Expand-Archive onnxruntime.zip -DestinationPath .
+          # Unpacked aside: the NuGet package has a README.md and more at its
+          # root, which would land on the checkout's.
+          Expand-Archive onnxruntime.zip -DestinationPath ort-unpacked
           $dir = "$PWD\onnxruntime-${{ matrix.ort }}-$env:ORT_VERSION"
+          $release = "$PWD\ort-unpacked\onnxruntime-${{ matrix.ort }}-$env:ORT_VERSION"
           # From NuGet (deps.lock says why) the files sit under
           # runtimes/<rid>/native: laid out as the release zip had them.
-          $native = "$PWD\runtimes\${{ matrix.ort }}\native"
-          if (Test-Path $native) {
+          $native = "$PWD\ort-unpacked\runtimes\${{ matrix.ort }}\native"
+          if (Test-Path $release) {
+            Move-Item $release $dir
+          } elseif (Test-Path $native) {
             New-Item -ItemType Directory -Force "$dir\lib" | Out-Null
             Copy-Item "$native\*" "$dir\lib"
           }
