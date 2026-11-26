@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Komunikia
 
 //! Komunta's "Guion de montaje" pane: the plan of a montage project, as a
-//! script to edit, and "Aplicar al vídeo".
+//! script to edit, and "Crear versión con mis cambios".
 //!
 //! A project montaged with AI carries `montaje.json`, which names the
 //! engine's job; the plan is read from there when the project opens. A
@@ -52,6 +52,12 @@ pub enum GuionMsg {
     /// Back to the plan as it was last applied.
     Revert,
     Apply,
+    /// The guide: next step, the one before, closed (seen), or opened again
+    /// from its first step.
+    GuideNext,
+    GuideBack,
+    GuideClose,
+    GuideOpen,
     /// The plan laid out on its own, ready to add to the project.
     Prepared(Result<Project, String>),
 }
@@ -81,6 +87,9 @@ pub struct GuionPane {
     published: Cell<u64>,
     /// The agent asked for the script to be applied once its turn is over.
     aplicar_al_acabar: bool,
+    /// The guide's step while it is open. Kept over a `load`: laying out a
+    /// version reads the script again in the middle of the guide.
+    guia: Option<i32>,
 }
 
 impl Default for GuionPane {
@@ -100,17 +109,22 @@ impl Default for GuionPane {
             revision: 1,
             published: Cell::new(0),
             aplicar_al_acabar: false,
+            guia: None,
         }
     }
 }
+
+/// How many steps the guide has; the window's `GuionPanel.guide-steps`.
+const PASOS_GUIA: i32 = 4;
 
 impl GuionPane {
     /// Reads the plan of the project in `proyecto`, if it is a montage;
     /// otherwise the pane says it is not one.
     pub fn load(&mut self, proyecto: &Path) {
-        let columns = self.columns;
+        let (columns, guia) = (self.columns, self.guia);
         *self = Self {
             columns,
+            guia,
             ..Self::default()
         };
         let Some(encargo) = Encargo::leer(proyecto) else {
@@ -132,6 +146,14 @@ impl GuionPane {
                 self.status = tf("guion.jobMissing", &[&encargo.trabajo.display()]);
                 self.encargo = Some(encargo);
             }
+        }
+    }
+
+    /// A montage has just been opened: the guide opens by itself the first
+    /// time, until it has been closed once.
+    pub fn open_guide_once(&mut self, seen: bool) {
+        if self.linked() && !seen {
+            self.guia = Some(0);
         }
     }
 
@@ -176,6 +198,26 @@ impl GuionPane {
                 return;
             }
             GuionMsg::Apply => return self.apply(studio),
+            GuionMsg::GuideNext => {
+                self.guia = self.guia.map(|paso| (paso + 1).min(PASOS_GUIA - 1));
+                return;
+            }
+            GuionMsg::GuideBack => {
+                self.guia = self.guia.map(|paso| (paso - 1).max(0));
+                return;
+            }
+            GuionMsg::GuideOpen => {
+                self.guia = Some(0);
+                return;
+            }
+            GuionMsg::GuideClose => {
+                self.guia = None;
+                if !studio.prefs.montaje.guia_vista {
+                    studio.prefs.montaje.guia_vista = true;
+                    studio.prefs.save(&studio.host.dirs);
+                }
+                return;
+            }
             GuionMsg::Prepared(result) => return self.prepared(result, studio),
             GuionMsg::Revert => {
                 if let Some(proyecto) = self.proyecto.clone() {
@@ -285,6 +327,7 @@ impl GuionPane {
         panel.set_dirty(self.dirty);
         panel.set_busy(self.busy);
         panel.set_status(self.status.as_str().into());
+        panel.set_guide(self.guia.unwrap_or(-1));
         if self.published.get() == self.revision {
             return;
         }

@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Map, Value, json};
 
 use crate::backend::Backend;
-use crate::tools::{Context, Toolbox};
+use crate::tools::{self, Context, Toolbox};
 
 /// The newest protocol, served without a handshake.
 pub const MODERN: &str = "2026-07-28";
@@ -56,7 +56,7 @@ mod code {
 }
 
 /// What the agent is told about this server, once, when it connects.
-const INSTRUCTIONS: &str = "Komunta is a video editor; these tools edit its projects. A project is a folder: open one (project_open) or make one (project_create), then pass its folder as `path` to every other tool. Read timeline_read for the ids of lanes (tracks), clips and media. Times and durations are seconds on the timeline; positions within a clip (keyframes) are fractions from 0 to 1; sizes and offsets of titles and pictures are fractions of the frame. Every edit is one undoable step (edit_undo); edit_apply with a batch command makes several into one. Edits live in memory until project_save. To render, export_start then export_wait. preview_frame shows the frame at a time. A refused edit says why in the window's words and changes nothing.";
+const INSTRUCTIONS: &str = "Komunta is a video editor; these tools edit its projects. A project is a folder: open one (project_open) or make one (project_create), then pass its folder as `path` to every other tool. Read timeline_read for the ids of lanes (tracks), clips and media. Times and durations are seconds on the timeline; positions within a clip (keyframes) are fractions from 0 to 1; sizes and offsets of titles and pictures are fractions of the frame. Every edit is one undoable step (edit_undo); edit_apply with a batch command makes several into one. Edits live in memory until project_save. With the project open in the Komunta window, its own tools come too: montage with AI (montaje_*, a folder of material to a finished cut), the script (guion_*), a whole folder imported (carpeta_importar) and animation recipes. To render, export_start then export_wait. preview_frame shows the frame at a time. A refused edit says why in the window's words and changes nothing.";
 
 /// The server's name and version, as `serverInfo`.
 fn server_info() -> Value {
@@ -133,6 +133,7 @@ pub fn serve(
     let toolbox = Toolbox::new();
     let mut server = Server {
         toolbox,
+        window: None,
         output: output.clone(),
         cancels,
     };
@@ -269,6 +270,9 @@ fn modern_version(params: &Value) -> Option<&str> {
 
 struct Server {
     toolbox: Toolbox,
+    /// The names of the window's own tools, as the last `tools/list`
+    /// found them.
+    window: Option<Vec<String>>,
     output: Output,
     cancels: Arc<Mutex<Cancels>>,
 }
@@ -363,7 +367,11 @@ impl Server {
                 reply["result"]["resultType"] = json!("complete");
                 reply
             }
-            "tools/list" => success(id, json!({ "tools": self.toolbox.list() }), params),
+            "tools/list" => {
+                let mut tools = self.toolbox.list();
+                tools.extend(self.window_tools(backend));
+                success(id, json!({ "tools": tools }), params)
+            }
             "tools/call" => self.call(id, params, backend, cancelled),
             _ => failure(
                 id.clone(),
@@ -372,6 +380,28 @@ impl Server {
                 None,
             ),
         }
+    }
+
+    /// The window's own tools, their names kept for `tools/call`.
+    fn window_tools(&mut self, backend: &mut dyn Backend) -> Vec<Value> {
+        let tools = tools::window_tools(backend);
+        let names = tools
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
+            .collect();
+        self.window = Some(names);
+        tools
+    }
+
+    /// Whether `name` is one of the window's tools; asks the window the
+    /// first time, for a client that calls without listing.
+    fn is_window_tool(&mut self, name: &str, backend: &mut dyn Backend) -> bool {
+        if self.window.is_none() {
+            self.window_tools(backend);
+        }
+        self.window
+            .as_ref()
+            .is_some_and(|names| names.iter().any(|known| known == name))
     }
 
     fn call(
@@ -398,6 +428,7 @@ impl Server {
                 None,
             );
         }
+        let of_the_window = self.toolbox.find(name).is_none() && self.is_window_tool(name, backend);
         let token = params
             .pointer("/_meta/progressToken")
             .filter(|token| token.is_string() || token.is_i64() || token.is_u64())
@@ -425,7 +456,11 @@ impl Server {
         };
         // A panic in a tool is that call's failure, not the server's end.
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.toolbox.call(name, arguments, context)
+            if of_the_window {
+                Some(tools::call_window(name, arguments, context.backend))
+            } else {
+                self.toolbox.call(name, arguments, context)
+            }
         }));
         match outcome {
             Ok(Some(outcome)) => {

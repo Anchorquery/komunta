@@ -21,7 +21,8 @@ use concat_project::Command;
 
 use crate::i18n::tf;
 use crate::panes::Msg;
-use crate::panes::asistente::{AsistenteMsg, Pregunta};
+use crate::panes::asistente::{AsistenteMsg, Pregunta, correr_lo_pendiente};
+use crate::panes::asistente_vivo;
 use crate::panes::asistente_catalogo::QUITAR_SIN_PREGUNTAR;
 use crate::studio::Studio;
 
@@ -93,8 +94,37 @@ pub struct VentanaViva {
     llamadas: AtomicU64,
 }
 
+impl VentanaViva {
+    /// The gesture a call's edits go under: one undo step each.
+    fn gesto(&self) -> String {
+        format!("api:{}", self.llamadas.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// One of the window's own tools, for an outside agent. What it left
+    /// for after the turn starts now when no turn is under way in the
+    /// pane; when one is, the pane starts it as that turn ends.
+    fn propia(&self, ruta: String, nombre: &str, argumentos: serde_json::Value) -> Result<Reply, ApiError> {
+        let valor = asistente_vivo::ejecutar_propia(ruta, nombre, argumentos, self.gesto());
+        en_ventana(None, |studio| {
+            if let Some(session) = studio.session.as_mut() {
+                session.end_gesture();
+            }
+            if !studio.asistente.ocupado() {
+                correr_lo_pendiente(studio);
+            }
+            Ok(())
+        })?;
+        valor.map(Reply::Tool)
+    }
+}
+
 impl LiveWindow for VentanaViva {
     fn call(&self, request: Request) -> Result<Reply, ApiError> {
+        match request {
+            Request::WindowTools => return Ok(Reply::Tools(asistente_vivo::propias_para_mcp())),
+            Request::WindowTool { path, name, arguments } => return self.propia(path, &name, arguments),
+            _ => {}
+        }
         if let Request::PreviewFrame {
             time,
             output,
@@ -111,7 +141,7 @@ impl LiveWindow for VentanaViva {
             return Err(ApiError::new(ErrorCode::Refused, "la persona no lo ha permitido"));
         }
         let request = preparar(request)?;
-        let gesto = format!("api:{}", self.llamadas.fetch_add(1, Ordering::Relaxed));
+        let gesto = self.gesto();
         en_ventana(None, move |studio| {
             let respuesta = studio.en_vivo(&gesto, request);
             if let Some(session) = studio.session.as_mut() {

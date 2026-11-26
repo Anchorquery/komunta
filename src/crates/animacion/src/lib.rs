@@ -12,9 +12,12 @@
 //! - [`titulo`]: how a title comes in and goes: fades, rises, grows.
 //! - [`seguir`]: a title that follows a face.
 //! - [`copia`]: a copy of a clip, as Duplicate and Paste make one.
+//! - [`movimiento`]: free keys an AI writes, the named moves (a pop, a
+//!   shake, a pulse, a slide, a spin, a drift) and a photo's parallax.
 
 pub mod copia;
 pub mod llaves;
+pub mod movimiento;
 pub mod seguir;
 pub mod tiempo;
 pub mod titulo;

@@ -43,6 +43,18 @@ pub const MAX_SEG_FOTO: f64 = 2.0;
 /// The longest a contact video - one request - runs: 15 minutes.
 pub const MAX_SEG_LOTE: f64 = 900.0;
 
+/// An AI on this computer that looks at pictures: a command-line AI on
+/// the team's subscription, with no API key. Handed sheets of frames and
+/// what to do with them, it answers in text.
+pub trait Mirador: Send + Sync {
+    /// Its name, for the log and the summary.
+    fn nombre(&self) -> &'static str;
+    /// How many sheets one request takes.
+    fn hojas_por_peticion(&self) -> usize;
+    /// Its answer to `instruccion` over the pictures `hojas`.
+    fn mirar(&self, hojas: &[PathBuf], instruccion: &str) -> Result<String, String>;
+}
+
 /// What an AI said a clip or still shows.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

@@ -275,7 +275,7 @@ impl MontajePane {
                 self.message = t("montaje.layingOut");
             }
             MontajeMsg::Done(result) => self.done(result, studio),
-            MontajeMsg::SettingEdited(field, value) => self.ajustes.editado(&field, value),
+            MontajeMsg::SettingEdited(field, value) => self.ajustes.editado(&field, value, studio),
             MontajeMsg::SettingChoice(field, value) => self.ajustes.elegido(&field, value, studio),
             MontajeMsg::SettingAction(name) => match name.as_str() {
                 "recipes" => {

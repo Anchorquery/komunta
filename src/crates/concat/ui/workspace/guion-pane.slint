@@ -7,8 +7,10 @@
 // word by word - a word clicked is cut, struck through, and clicked again
 // comes back - then the captions that go over it, editable in place, and
 // the B-roll laid on it. Takes move up and down and go. Nothing touches the
-// timelines until "Aplicar al vídeo", which lays the edited plan out again
-// as new timelines beside the old ones.
+// timelines until "Crear versión con mis cambios", which lays the edited
+// plan out again, with no AI, as a new timeline beside the old ones. A
+// short guide, four steps, explains all this the first time a montage is
+// opened and from the help button after that.
 //
 // The state is all Rust's (`panes::guion`), in the `GuionPanel` global, so
 // two seats showing the script are one script.
@@ -84,7 +86,7 @@ export global GuionPanel {
     in property <string> summary;
     /// There are edits not yet applied.
     in property <bool> dirty;
-    /// "Aplicar al vídeo" is working.
+    /// "Crear versión con mis cambios" is working.
     in property <bool> busy;
     /// What happened last, or why not.
     in property <string> status;
@@ -116,6 +118,17 @@ export global GuionPanel {
     callback cancel();
     /// The error read.
     callback dismiss();
+
+    /// The guide's step, 0 to `guide-steps` - 1; -1 is the guide closed.
+    in property <int> guide: -1;
+    out property <int> guide-steps: 4;
+    callback guide-next();
+    callback guide-back();
+    /// "Saltar" or "Entendido": the guide is closed and not offered again
+    /// by itself.
+    callback guide-close();
+    /// The help button: the guide from its first step.
+    callback guide-open();
 }
 
 /// A word: clicked, it is cut or comes back.
@@ -401,6 +414,8 @@ component BarSummary inherits Text {
 
 component RedoButton inherits Button {
     label: I18n.t("montaje.redo");
+    tip: I18n.t("guion.redoTip");
+    glyph: Glyph.sparkle;
     ghost: true;
     enabled: !GuionPanel.busy;
     clicked => { GuionPanel.redo(); }
@@ -408,17 +423,165 @@ component RedoButton inherits Button {
 
 component RevertButton inherits Button {
     label: I18n.t("guion.revert");
+    tip: I18n.t("guion.revertTip");
     ghost: true;
     enabled: GuionPanel.dirty && !GuionPanel.busy;
     clicked => { GuionPanel.revert(); }
 }
 
+// No spark on it: this one does not ask the AI for anything.
 component ApplyButton inherits Button {
     label: GuionPanel.busy ? I18n.t("guion.applying") : I18n.t("guion.apply");
-    glyph: Glyph.sparkle;
+    tip: I18n.t("guion.applyTip");
+    glyph: Glyph.plus;
     primary: true;
     enabled: !GuionPanel.busy;
     clicked => { GuionPanel.apply(); }
+}
+
+component GuideButton inherits IconButton {
+    glyph: Glyph.help;
+    label: I18n.t("guion.guideOpen");
+    clicked => { GuionPanel.guide-open(); }
+}
+
+// The guide: a few steps, one at a time, on what the panel is and what
+// each button does. It sits over the takes, inside the pane, so the
+// buttons it speaks of are in sight.
+component Guide inherits Rectangle {
+    function title(step: int) -> string {
+        step == 0 ? I18n.t("guion.guide1Title")
+            : step == 1 ? I18n.t("guion.guide2Title")
+            : step == 2 ? I18n.t("guion.guide3Title")
+            : I18n.t("guion.guide4Title")
+    }
+    function body(step: int) -> string {
+        step == 0 ? I18n.t("guion.guide1Body")
+            : step == 1 ? I18n.t("guion.guide2Body")
+            : step == 2 ? I18n.t("guion.guide3Body")
+            : I18n.t("guion.guide4Body")
+    }
+    property <bool> last: GuionPanel.guide >= GuionPanel.guide-steps - 1;
+
+    border-radius: Theme.r;
+    background: Theme.accent-soft;
+    border-width: 1px;
+    border-color: Theme.accent;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            VerticalLayout {
+                alignment: center;
+                Icon {
+                    glyph: Glyph.help;
+                    size: 14px;
+                    tint: Theme.accent;
+                }
+            }
+
+            Text {
+                horizontal-stretch: 1;
+                text: I18n.t2("guion.guideCounter",
+                    "" + (GuionPanel.guide + 1), "" + GuionPanel.guide-steps);
+                color: Theme.accent;
+                font-size: Theme.fs-sm;
+                font-weight: Theme.weight-title;
+                vertical-alignment: center;
+            }
+
+            for n in GuionPanel.guide-steps: VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: n == GuionPanel.guide ? Theme.accent : Theme.line-strong;
+                }
+            }
+        }
+
+        Text {
+            text: title(GuionPanel.guide);
+            color: Theme.fg;
+            font-size: Theme.fs-lg;
+            font-weight: Theme.weight-title;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: body(GuionPanel.guide);
+            color: Theme.fg;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            padding-top: 4px;
+
+            Button {
+                label: I18n.t("guion.guideSkip");
+                ghost: true;
+                clicked => { GuionPanel.guide-close(); }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            if GuionPanel.guide > 0: Button {
+                label: I18n.t("guion.guideBack");
+                clicked => { GuionPanel.guide-back(); }
+            }
+
+            Button {
+                label: root.last ? I18n.t("guion.guideDone") : I18n.t("guion.guideNext");
+                primary: true;
+                clicked => {
+                    if (root.last) {
+                        GuionPanel.guide-close();
+                    } else {
+                        GuionPanel.guide-next();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Edits are only a draft: said so, and said what turns them into
+// something, for as long as there are some.
+component DraftNote inherits Rectangle {
+    border-radius: Theme.r;
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.line-strong;
+
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: start;
+            padding-top: 1px;
+            Icon {
+                glyph: Glyph.info;
+                size: 12px;
+                tint: Theme.accent;
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: I18n.t("guion.draft");
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+    }
 }
 
 export component GuionPane inherits Pane {
@@ -569,11 +732,12 @@ export component GuionPane inherits Pane {
         }
     }
 
-    // One row while the summary and the three buttons fit; under that,
-    // the summary over Redo and Revert, and Apply across the pane on a
-    // line of its own. A narrow pane used to cut the buttons off.
+    // One row while the summary, the help and the three buttons fit; under
+    // that, the summary over Redo, Revert and the help, and Apply across
+    // the pane on a line of its own. A narrow pane used to cut the buttons
+    // off.
     if !GuionPanel.running && GuionPanel.linked: Rectangle {
-        property <bool> roomy: self.width >= 460px;
+        property <bool> roomy: self.width >= 760px;
         height: self.roomy ? 40px : stack.preferred-height + 1px;
         Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
 
@@ -586,6 +750,7 @@ export component GuionPane inherits Pane {
                 spacing: 8px;
 
                 BarSummary { horizontal-stretch: 1; }
+                VerticalLayout { alignment: center; GuideButton { } }
                 VerticalLayout { alignment: center; RedoButton { } }
                 VerticalLayout { alignment: center; RevertButton { } }
                 VerticalLayout { alignment: center; ApplyButton { } }
@@ -608,6 +773,7 @@ export component GuionPane inherits Pane {
                     RedoButton { }
                     RevertButton { }
                     Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout { alignment: center; GuideButton { } }
                 }
                 ApplyButton { block: true; }
             }
@@ -620,6 +786,10 @@ export component GuionPane inherits Pane {
         VerticalLayout {
             padding: 10px;
             spacing: 8px;
+
+            if GuionPanel.guide >= 0: Guide { }
+
+            if GuionPanel.dirty && !GuionPanel.busy: DraftNote { }
 
             Review { warnings: GuionPanel.warnings; }
 

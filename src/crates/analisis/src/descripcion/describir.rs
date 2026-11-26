@@ -5,7 +5,8 @@
 //! planner still has the contact sheets. The engine's `describir`.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::Value;
 
@@ -14,7 +15,7 @@ use super::contacto;
 use super::cuota::Cuota;
 use super::google::{self, ErrorGemini, Gemini};
 use super::respuesta::{self, Tramo};
-use super::{Descripcion, Pendiente, Tipo, lotes, numero, pendientes, redondear, tiras};
+use super::{Descripcion, Mirador, Pendiente, Tipo, lotes, numero, pendientes, redondear, tiras};
 use crate::cache::Cache;
 use crate::inventario::Inventario;
 use crate::trabajo::Archivo;
@@ -28,7 +29,7 @@ pub const RESERVA_PLAN: u32 = 4;
 const ESPERA_GEMINI: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Who describes, with what.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub enum Proveedor {
     /// Gemini, by Google.
     Google {
@@ -48,6 +49,8 @@ pub enum Proveedor {
         /// The model.
         modelo: String,
     },
+    /// A command-line AI, on the subscription signed in on this computer.
+    Cli(Arc<dyn Mirador>),
 }
 
 impl Proveedor {
@@ -56,7 +59,15 @@ impl Proveedor {
         match self {
             Proveedor::Google { .. } => "google",
             Proveedor::Anthropic { .. } => "anthropic",
+            Proveedor::Cli(mirador) => mirador.nombre(),
         }
+    }
+}
+
+/// Keys left out: a provider in the log is its name.
+impl std::fmt::Debug for Proveedor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.id())
     }
 }
 
@@ -113,7 +124,18 @@ pub fn describir(encargo: &Encargo, mut avisar: impl FnMut(&str)) -> io::Result<
             }
             Proveedor::Anthropic { clave, modelo } => {
                 let claude = Claude::new(clave.clone(), modelo.clone());
-                con_claude(encargo, &claude, pendientes, &mut archivo, &mut avisar)?
+                let mirar = |hojas: &[PathBuf], texto: &str| match claude.describir(hojas, texto) {
+                    Ok(texto) => Ok(texto),
+                    Err(error @ (ErrorClaude::Rechazo | ErrorClaude::Cortado)) => Err(Fallo::Saltar(error.to_string())),
+                    Err(error) => Err(Fallo::Parar(error.to_string())),
+                };
+                let mirada = Mirada { quien: "Claude", hojas_por_peticion: anthropic::HOJAS_POR_PETICION };
+                con_tiras(encargo, &mirada, mirar, pendientes, &mut archivo, &mut avisar)?
+            }
+            Proveedor::Cli(mirador) => {
+                let mirar = |hojas: &[PathBuf], texto: &str| mirador.mirar(hojas, texto).map_err(Fallo::Parar);
+                let mirada = Mirada { quien: mirador.nombre(), hojas_por_peticion: mirador.hojas_por_peticion() };
+                con_tiras(encargo, &mirada, mirar, pendientes, &mut archivo, &mut avisar)?
             }
         };
         if let Some(error) = &parcial.error {
@@ -247,29 +269,45 @@ fn sin_cuota(cuota: &Cuota, modelos: &[String], limite_diario: Option<u32>, lote
     })
 }
 
-/// Claude looking at sheets of strips, up to [`anthropic::HOJAS_POR_PETICION`]
-/// a request.
-fn con_claude(
+/// Why a request for a batch of sheets gave nothing.
+enum Fallo {
+    /// This batch only: the next may go.
+    Saltar(String),
+    /// The provider: no batch will go.
+    Parar(String),
+}
+
+/// Who looks at the sheets, and how many it takes at once.
+struct Mirada {
+    quien: &'static str,
+    hojas_por_peticion: usize,
+}
+
+/// Sheets of strips looked at by `mirar`, as many a request as `mirada`
+/// takes: Claude, or a command-line AI.
+fn con_tiras(
     encargo: &Encargo,
-    claude: &Claude,
+    mirada: &Mirada,
+    mut mirar: impl FnMut(&[PathBuf], &str) -> Result<String, Fallo>,
     pendientes: Vec<Pendiente>,
     archivo: &mut Archivo,
     avisar: &mut impl FnMut(&str),
 ) -> io::Result<Parcial> {
-    avisar(&format!("Claude mira el material ({} clips en fotogramas)", pendientes.len()));
+    avisar(&format!("{} mira el material ({} clips en fotogramas)", mirada.quien, pendientes.len()));
     let carpeta = encargo.trabajo.join("ia").join("tiras");
     let hojas = tiras::hojas(&pendientes, &carpeta)?;
-    let por_peticion = anthropic::HOJAS_POR_PETICION * tiras::FILAS_HOJA;
+    let hojas_por_peticion = mirada.hojas_por_peticion.max(1);
+    let por_peticion = hojas_por_peticion * tiras::FILAS_HOJA;
     let mut parcial = Parcial::default();
-    for (hojas, grupo) in hojas.chunks(anthropic::HOJAS_POR_PETICION).zip(pendientes.chunks(por_peticion)) {
-        let texto = match claude.describir(hojas, &instruccion_imagenes(grupo)) {
+    for (hojas, grupo) in hojas.chunks(hojas_por_peticion).zip(pendientes.chunks(por_peticion)) {
+        let texto = match mirar(hojas, &instruccion_imagenes(grupo)) {
             Ok(texto) => texto,
-            Err(error @ (ErrorClaude::Rechazo | ErrorClaude::Cortado)) => {
-                parcial.error = Some(error.to_string());
+            Err(Fallo::Saltar(error)) => {
+                parcial.error = Some(error);
                 continue;
             }
-            Err(error) => {
-                parcial.error = Some(error.to_string());
+            Err(Fallo::Parar(error)) => {
+                parcial.error = Some(error);
                 break;
             }
         };

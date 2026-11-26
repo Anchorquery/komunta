@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use crate::ia::Ia;
 use crate::llavero::{self, Llavero};
+use crate::plan::clis::MiradorCli;
 use crate::proveedores::Proveedor;
 
 /// A provider that can describe, with what it needs.
@@ -25,9 +26,23 @@ pub struct Descriptor {
     pub limite_diario: Option<u32>,
 }
 
+/// The command-line AI that describes instead of the API providers, with
+/// no key - Codex, Gemini CLI or Claude Code - when the team chose one, or
+/// when "auto" goes with one planning.
+pub fn mirador(ia: &Ia, config: &Value) -> Option<&'static str> {
+    let preferido = preferido(ia, config)?;
+    let cerebro = ia.cerebro.as_deref().or_else(|| config["ia"]["modo"].as_str());
+    let modo = match preferido.as_str() {
+        "auto" => cerebro?,
+        elegido => elegido,
+    };
+    MiradorCli::MODOS.into_iter().find(|cli| *cli == modo)
+}
+
 /// The providers that describe for `ia` under the engine's `config`, in
 /// order, those with a key in `llavero`, the engine's `.env` at
-/// `env_motor` or the environment; none when the description is off.
+/// `env_motor` or the environment; none when the description is off, or
+/// is a command-line AI's ([`mirador`]).
 pub fn descriptores(ia: &Ia, config: &Value, llavero: &impl Llavero, env_motor: &Path) -> Vec<Descriptor> {
     elegir(ia, config, |proveedor| llavero::clave(proveedor, llavero, env_motor))
 }
@@ -37,6 +52,9 @@ fn elegir(ia: &Ia, config: &Value, clave: impl Fn(Proveedor) -> Option<String>) 
     let Some(preferido) = preferido(ia, config) else {
         return Vec::new();
     };
+    if mirador(ia, config).is_some() {
+        return Vec::new();
+    }
     let cerebro = ia.cerebro.as_deref().or_else(|| config["ia"]["modo"].as_str());
     orden(&preferido, cerebro)
         .into_iter()
@@ -51,8 +69,8 @@ fn elegir(ia: &Ia, config: &Value, clave: impl Fn(Proveedor) -> Option<String>) 
         .collect()
 }
 
-/// Who the team prefers ("auto", "google", "anthropic"); None when the
-/// description is off.
+/// Who the team prefers ("auto", an API provider or a command-line AI);
+/// None when the description is off.
 fn preferido(ia: &Ia, config: &Value) -> Option<String> {
     let opciones = &config["descripcion"];
     let elegido = ia.descripcion.as_deref().map(str::to_owned).or_else(|| {
@@ -73,7 +91,7 @@ fn preferido(ia: &Ia, config: &Value) -> Option<String> {
 /// Claude Code - and Gemini otherwise.
 fn orden(preferido: &str, cerebro: Option<&str>) -> [Proveedor; 2] {
     let claude_primero = match preferido {
-        "auto" => matches!(cerebro, Some("anthropic" | "claude_code")),
+        "auto" => cerebro == Some("anthropic"),
         otro => otro == "anthropic",
     };
     if claude_primero {
@@ -137,8 +155,12 @@ descripcion:
     }
 
     #[test]
-    fn claude_code_planning_puts_claude_first() {
-        let descriptores = elegir(&Ia::default(), &config(), ambas);
+    fn claude_planning_puts_claude_first() {
+        let ia = Ia {
+            cerebro: Some("anthropic".into()),
+            ..Ia::default()
+        };
+        let descriptores = elegir(&ia, &config(), ambas);
         let orden: Vec<Proveedor> = descriptores.iter().map(|d| d.proveedor).collect();
         assert_eq!(orden, [Proveedor::Anthropic, Proveedor::Google]);
         assert_eq!(descriptores[0].modelos, ["claude-opus-5-5"]);
@@ -162,6 +184,37 @@ descripcion:
             ..Ia::default()
         };
         assert!(elegir(&apagado, &config(), ambas).is_empty());
+    }
+
+    #[test]
+    fn codex_describes_with_no_key_when_chosen_or_planning_on_auto() {
+        let elegido = Ia {
+            descripcion: Some("codex".into()),
+            ..Ia::default()
+        };
+        assert_eq!(mirador(&elegido, &config()), Some("codex"));
+        assert!(elegir(&elegido, &config(), ambas).is_empty(), "no API spent beside it");
+        let planea = Ia {
+            cerebro: Some("codex".into()),
+            ..Ia::default()
+        };
+        assert_eq!(mirador(&planea, &config()), Some("codex"));
+        let gemini = Ia {
+            descripcion: Some("gemini_cli".into()),
+            ..Ia::default()
+        };
+        assert_eq!(mirador(&gemini, &config()), Some("gemini_cli"));
+        let por_api = Ia {
+            cerebro: Some("anthropic".into()),
+            ..Ia::default()
+        };
+        assert_eq!(mirador(&por_api, &config()), None, "an API planner describes with keys");
+        let apagado = Ia {
+            cerebro: Some("codex".into()),
+            descripcion: Some("ninguno".into()),
+            ..Ia::default()
+        };
+        assert_eq!(mirador(&apagado, &config()), None);
     }
 
     #[test]

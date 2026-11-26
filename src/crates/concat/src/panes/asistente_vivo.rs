@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use analisis::caras::{BuscaCaras, Detector};
 use animacion::seguir::Caja;
-use asistente::{Ejecutor, Herramienta, Imagen, Salida, Tipo};
-use concat_api::{ApiError, Reply, Request};
+use asistente::{Clase, Ejecutor, Herramienta, Imagen, Salida, Tipo};
+use concat_api::{ApiError, ErrorCode, Reply, Request};
 use concat_export::ExportClip;
 use concat_host::preview::{FrameSpec, Monitor};
 use concat_mcp::Backend;
@@ -28,6 +28,7 @@ use concat_project::model::Project;
 use concat_project::{Command, DocumentSettings};
 use serde_json::{Value, json};
 
+use super::asistente_carpeta as carpeta;
 use super::asistente_catalogo::{self as catalogo, quita_muchos};
 use super::asistente_guion as guion;
 use super::asistente_montaje as montaje;
@@ -228,10 +229,77 @@ impl Herramientas {
     }
 }
 
+/// The window's own tools, the MCP server's aside: the recipes, a whole
+/// folder brought in, the script and montage with AI. `ver_fotograma` stays out: an outside agent
+/// has `preview_frame`.
+fn propias() -> Vec<Herramienta> {
+    let mut propias = recetas::herramientas();
+    propias.retain(|herramienta| herramienta.nombre != recetas::VER_FOTOGRAMA);
+    propias.extend(carpeta::herramientas());
+    propias.extend(guion::herramientas());
+    propias.extend(montaje::herramientas());
+    propias
+}
+
+/// [`propias`] for an outside agent (`window.tools`), as MCP lists a tool:
+/// each schema with the project's `path`, which the server goes by.
+pub fn propias_para_mcp() -> Vec<Value> {
+    propias()
+        .into_iter()
+        .map(|herramienta| {
+            let mut esquema = herramienta.esquema;
+            esquema["properties"]["path"] = json!({
+                "type": "string",
+                "description": "The project folder: the one open in Komunta.",
+            });
+            let mut requeridos = esquema["required"].as_array().cloned().unwrap_or_default();
+            requeridos.push(json!("path"));
+            esquema["required"] = Value::Array(requeridos);
+            json!({
+                "name": herramienta.nombre,
+                "description": herramienta.descripcion,
+                "inputSchema": esquema,
+                "annotations": {
+                    "readOnlyHint": herramienta.clase.solo_lee(),
+                    "destructiveHint": herramienta.clase == Clase::Destructiva,
+                    "openWorldHint": herramienta.clase == Clase::Gasto,
+                },
+            })
+        })
+        .collect()
+}
+
+/// Runs the window's own tool `nombre` for an outside agent on the
+/// project at `ruta`, as the window's agent would: the clips it names
+/// checked first, and what asks first put to the person in the pane.
+pub fn ejecutar_propia(ruta: String, nombre: &str, argumentos: Value, gesto: String) -> Result<Value, ApiError> {
+    let herramienta = propias()
+        .into_iter()
+        .find(|herramienta| herramienta.nombre == nombre)
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, format!("no hay ninguna herramienta «{nombre}» en la ventana")))?;
+    let mut herramientas = Herramientas::new(ruta, gesto, Arc::default());
+    herramientas.comprobar(nombre, &argumentos).map_err(ApiError::invalid)?;
+    if herramientas.pide_aprobacion(&herramienta, &argumentos)
+        && !en_vivo::preguntar(nombre, herramientas.detalle(nombre, &argumentos))
+    {
+        return Err(ApiError::new(ErrorCode::Refused, "la persona no lo ha permitido"));
+    }
+    let salida = herramientas.ejecutar(nombre, argumentos);
+    if salida.ok() {
+        return Ok(salida.valor);
+    }
+    let motivo = salida.valor.as_str().map_or_else(|| salida.valor.to_string(), str::to_owned);
+    Err(ApiError::failed(match salida.sugerencia {
+        Some(sugerencia) => format!("{motivo} ({sugerencia})"),
+        None => motivo,
+    }))
+}
+
 impl Ejecutor for Herramientas {
     fn herramientas(&self) -> Vec<Herramienta> {
         let mut todas = catalogo::herramientas(&self.caja);
         todas.extend(recetas::herramientas());
+        todas.extend(carpeta::herramientas());
         todas.extend(guion::herramientas());
         todas.extend(montaje::herramientas());
         todas
@@ -259,12 +327,16 @@ impl Ejecutor for Herramientas {
     fn detalle(&self, nombre: &str, argumentos: &Value) -> String {
         guion::detalle(nombre, argumentos)
             .or_else(|| montaje::detalle(nombre, argumentos))
+            .or_else(|| carpeta::detalle(nombre, argumentos))
             .unwrap_or_else(|| detalle(nombre, argumentos))
     }
 
     fn ejecutar(&mut self, nombre: &str, argumentos: Value) -> Salida {
         if recetas::es_receta(nombre) {
             return recetas::ejecutar(&mut self.vivo, nombre, &argumentos);
+        }
+        if carpeta::es_de_carpeta(nombre) {
+            return carpeta::ejecutar(&mut self.vivo, &self.ruta, &argumentos);
         }
         if guion::es_del_guion(nombre) {
             return guion::ejecutar(&mut self.vivo, nombre, &argumentos);
@@ -340,6 +412,21 @@ fn texto_de(estructurado: Option<Value>, contenido: &[Value]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_outside_agent_gets_montage_script_and_folder_but_no_second_frame_tool() {
+        let propias = propias_para_mcp();
+        let nombres: Vec<&str> = propias.iter().filter_map(|h| h["name"].as_str()).collect();
+        for nombre in [montaje::LANZAR, carpeta::IMPORTAR, "guion_leer", "zoom_en"] {
+            assert!(nombres.contains(&nombre), "{nombre} is missing");
+        }
+        assert!(!nombres.contains(&recetas::VER_FOTOGRAMA), "preview_frame does that");
+        for herramienta in &propias {
+            let requeridos = herramienta["inputSchema"]["required"].as_array().unwrap();
+            assert!(requeridos.contains(&json!("path")), "{} is routed by its path", herramienta["name"]);
+            assert_eq!(herramienta["inputSchema"]["properties"]["path"]["type"], "string");
+        }
+    }
 
     #[test]
     fn the_path_is_put_back_in_the_call() {

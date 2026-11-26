@@ -16,12 +16,12 @@
 use std::cell::Cell;
 use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use asistente::externo::Faceta;
 use asistente::{Conversacion, Estado, Evento, Fin, Limites, Proveedor, Tarea};
 use serde_json::Value;
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, StyledText, VecModel};
 
 use crate::i18n::{t, tf};
 use crate::panes::Msg;
@@ -33,7 +33,14 @@ use crate::panes::asistente_opciones::{self, Opcion};
 use crate::panes::asistente_persona::{self, EnVentana, Mando};
 use crate::panes::asistente_vivo::Herramientas;
 use crate::studio::Studio;
-use crate::ui::{App, AsistenteLineaData, AsistenteOpcionData, AsistentePanel, AsistenteTareaData, PaneKind};
+use crate::ui::{
+    App, AsistenteBloqueData, AsistenteLineaData, AsistenteOpcionData, AsistentePanel, AsistenteTareaData, PaneKind,
+};
+
+/// How long a turn told to stop has to end before the pane gives up on
+/// it: one call to the AI can be left hanging by the network, and Stop
+/// must free the chat anyway.
+const GRACIA: Duration = Duration::from_secs(3);
 
 /// The standing instruction: who the AI is here and how it works.
 const SISTEMA: &str = "Eres el agente de edición de Komunta, un editor de vídeo. \
@@ -62,8 +69,8 @@ pub enum AsistenteMsg {
     Toggle,
     /// The person's words, to send.
     Send(String),
-    /// The pane is about this many characters wide.
-    Resized(i32),
+    /// The pane is on screen: its choices are drawn the first time.
+    Shown,
     /// How the turn under way goes.
     Event(Evento),
     /// A call waits for the person's yes.
@@ -72,15 +79,30 @@ pub enum AsistenteMsg {
     Answer(bool),
     /// Stop the turn under way.
     Stop,
-    /// The turn is over: the conversation back, the outside agent if
-    /// one ran it, and how it ended.
-    Finished(Box<Conversacion>, Option<Box<Abierto>>, Result<Fin, String>),
+    /// The turn of that number was told to stop a while ago: if it is
+    /// still running, the pane stops waiting for it.
+    GiveUp(u64),
+    /// A turn is over.
+    Finished(Box<Acabado>),
     /// A new conversation.
     Clear,
     /// The agent picked under the field, by its place in the list.
     AgentChosen(i32),
     /// One of the choices under the field set: the choice, the value.
     OptionChosen(i32, i32),
+}
+
+/// A turn over, back from its thread.
+#[derive(Debug)]
+pub struct Acabado {
+    /// Its number, to tell it from a turn the pane gave up on.
+    pub turno: u64,
+    /// The conversation, with the turn in it.
+    pub conversacion: Conversacion,
+    /// The outside agent, if one ran it.
+    pub externo: Option<Box<Abierto>>,
+    /// How it ended.
+    pub resultado: Result<Fin, String>,
 }
 
 /// A call put to the person: the tool, what it will do, and where the
@@ -124,8 +146,12 @@ pub struct AsistentePane {
     /// The outside agent the conversation is with, when it is not
     /// Komunta's own; taken by the turn with the conversation.
     externo: Option<Box<Abierto>>,
-    /// Turns sent, for each turn's gesture.
+    /// Turns sent, for each turn's gesture; the last is the one under
+    /// way, if any.
     turnos: u64,
+    /// The conversation as it was before the turn under way, to go on
+    /// from if the pane gives up on it.
+    antes: Option<Conversacion>,
     /// When the turn under way was sent.
     desde: Option<Instant>,
     estado: String,
@@ -137,7 +163,6 @@ pub struct AsistentePane {
     mando: Option<Mando>,
     /// The seat's view before the chat took it, to give back.
     sustituido: Option<PaneKind>,
-    columnas: usize,
     /// The agent in the list under the field: 0 is Komunta's own.
     agente: i32,
     /// The models Komunta's own agent can ask, for its choice.
@@ -156,13 +181,13 @@ impl Default for AsistentePane {
             conversacion: Some(Conversacion::default()),
             externo: None,
             turnos: 0,
+            antes: None,
             desde: None,
             estado: String::new(),
             plan: Vec::new(),
             preguntas: VecDeque::new(),
             mando: None,
             sustituido: None,
-            columnas: 40,
             agente: 0,
             modelos: Vec::new(),
             opciones: Vec::new(),
@@ -172,8 +197,21 @@ impl Default for AsistentePane {
     }
 }
 
+/// What a turn left for after it - the script applied, a montage started
+/// - run once the message at hand is done: both end by opening the
+/// project again, with the agent's pane put back in place.
+pub(crate) fn correr_lo_pendiente(studio: &mut Studio) {
+    if studio.guion.tomar_aplicar() {
+        crate::host::on_ui(|studio, _, _| studio.handle(Msg::Guion(GuionMsg::Apply)));
+    }
+    if studio.montaje.tomar_correr() {
+        crate::host::on_ui(|studio, _, _| studio.handle(Msg::Montaje(MontajeMsg::Run)));
+    }
+}
+
 impl AsistentePane {
-    fn ocupado(&self) -> bool {
+    /// Whether a turn is under way.
+    pub(crate) fn ocupado(&self) -> bool {
         self.conversacion.is_none()
     }
 
@@ -182,7 +220,6 @@ impl AsistentePane {
     pub fn olvidar(&mut self) {
         *self = Self {
             sustituido: self.sustituido,
-            columnas: self.columnas,
             agente: self.agente,
             modelos: std::mem::take(&mut self.modelos),
             opciones: std::mem::take(&mut self.opciones),
@@ -199,13 +236,7 @@ impl AsistentePane {
                 self.al_dia(studio);
             }
             AsistenteMsg::Send(texto) => self.enviar(texto.trim(), studio),
-            AsistenteMsg::Resized(columnas) => {
-                let columnas = columnas.max(16) as usize;
-                if columnas != self.columnas {
-                    self.columnas = columnas;
-                    self.revision += 1;
-                }
-                // The pane's first draw: its choices, once.
+            AsistenteMsg::Shown => {
                 if self.opciones.is_empty() {
                     self.al_dia(studio);
                 }
@@ -214,19 +245,25 @@ impl AsistentePane {
             AsistenteMsg::Ask(pregunta) => self.preguntar(pregunta, studio),
             AsistenteMsg::Answer(si) => self.responder(si),
             AsistenteMsg::Stop => self.parar(),
-            AsistenteMsg::Finished(conversacion, externo, resultado) => {
+            AsistenteMsg::GiveUp(turno) => self.abandonar(turno, studio),
+            AsistenteMsg::Finished(acabado) => {
+                let Acabado {
+                    turno,
+                    conversacion,
+                    externo,
+                    resultado,
+                } = *acabado;
+                if turno != self.turnos || !self.ocupado() {
+                    // Given up on: what it did is in the trace; what it
+                    // left for after it is not wanted any more.
+                    log::info!("asistente: turn {turno} ended after it was given up on");
+                    let _ = (studio.guion.tomar_aplicar(), studio.montaje.tomar_correr());
+                    return;
+                }
                 self.externo = externo;
-                self.terminado(*conversacion, resultado, studio);
+                self.terminado(conversacion, resultado, studio);
                 self.al_dia(studio);
-                // What the turn left for after it, once this message is done:
-                // both end by opening the project again, with this pane put
-                // back in place.
-                if studio.guion.tomar_aplicar() {
-                    crate::host::on_ui(|studio, _, _| studio.handle(Msg::Guion(GuionMsg::Apply)));
-                }
-                if studio.montaje.tomar_correr() {
-                    crate::host::on_ui(|studio, _, _| studio.handle(Msg::Montaje(MontajeMsg::Run)));
-                }
+                correr_lo_pendiente(studio);
             }
             AsistenteMsg::Clear => {
                 if !self.ocupado() {
@@ -318,7 +355,9 @@ impl AsistentePane {
             return;
         };
         self.decir(Quien::Persona, texto.to_owned());
+        self.antes = Some(conversacion.clone());
         self.turnos += 1;
+        let numero = self.turnos;
         self.desde = Some(Instant::now());
         self.estado = t("asistente.thinking");
         let gesto = format!("asistente:{}", self.turnos);
@@ -337,11 +376,16 @@ impl AsistentePane {
                 if let Err(error) = asistente::traza::anotar(&traza, &linea) {
                     log::warn!("asistente: the turn's trace was not written: {error}");
                 }
-                let fin = AsistenteMsg::Finished(Box::new(conversacion), externo, resultado);
-                a_la_ventana(epoch, fin);
+                let acabado = Acabado {
+                    turno: numero,
+                    conversacion,
+                    externo,
+                    resultado,
+                };
+                a_la_ventana(epoch, AsistenteMsg::Finished(Box::new(acabado)));
             });
         if let Err(error) = lanzado {
-            self.conversacion = Some(Conversacion::default());
+            self.conversacion = Some(self.antes.take().unwrap_or_default());
             self.externo = None;
             self.mando = None;
             self.estado.clear();
@@ -360,7 +404,17 @@ impl AsistentePane {
             return Err(t("asistente.externalNeedsLive"));
         }
         let clave = asistente_ia::clave_google(studio);
-        let agente = asistente_externo::agente(&id, clave).ok_or_else(|| tf("asistente.failed", &[&id]))?;
+        let carpeta = studio.host.dirs.data.join("asistente");
+        let ajustes = match asistente_externo::ajustes_gemini(&carpeta) {
+            Ok(ruta) if id == "gemini" => Some(ruta),
+            Ok(_) => None,
+            Err(error) => {
+                log::warn!("asistente: Gemini CLI's settings were not written: {error}");
+                None
+            }
+        };
+        let agente = asistente_externo::agente(&id, clave, ajustes.as_deref())
+            .ok_or_else(|| tf("asistente.failed", &[&id]))?;
         Ok(Trabajo::Externo {
             abierto: self.externo.take(),
             id,
@@ -369,6 +423,10 @@ impl AsistentePane {
     }
 
     fn evento(&mut self, evento: Evento) {
+        // From a turn given up on, which may still be asking the AI.
+        if !self.ocupado() {
+            return;
+        }
         match evento {
             Evento::Pensando => self.estado = t("asistente.thinking"),
             Evento::Herramienta(nombre) => {
@@ -399,13 +457,38 @@ impl AsistentePane {
     }
 
     /// Stop: the turn ends after the call under way, and a question of
-    /// its waiting gets a no.
+    /// its waiting gets a no. A turn still running [`GRACIA`] later is
+    /// given up on ([`Self::abandonar`]).
     fn parar(&mut self) {
-        if let Some(mando) = self.mando.as_ref() {
-            mando.parar();
-            self.preguntas.retain(|pregunta| !pregunta.del_turno);
-            self.estado = t("asistente.stopping");
+        let Some(mando) = self.mando.as_ref() else {
+            return;
+        };
+        mando.parar();
+        self.preguntas.retain(|pregunta| !pregunta.del_turno);
+        self.estado = t("asistente.stopping");
+        let (turno, epoch) = (self.turnos, crate::host::project_epoch());
+        let reloj = std::thread::Builder::new().name("asistente-parar".into()).spawn(move || {
+            std::thread::sleep(GRACIA);
+            a_la_ventana(epoch, AsistenteMsg::GiveUp(turno));
+        });
+        if let Err(error) = reloj {
+            log::warn!("asistente: no clock for Stop: {error}");
         }
+    }
+
+    /// The turn `turno`, told to stop, has not ended: most likely a call
+    /// to the AI the network left hanging. The chat goes on from the
+    /// conversation as it was before it, its edits are one undo step, and
+    /// whatever it sends back when it ends is dropped.
+    fn abandonar(&mut self, turno: u64, studio: &mut Studio) {
+        if turno != self.turnos || !self.ocupado() {
+            return;
+        }
+        log::warn!("asistente: turn {turno} did not stop in {} s; given up on", GRACIA.as_secs());
+        let antes = self.antes.take().unwrap_or_default();
+        self.terminado(antes, Ok(Fin::Parada), studio);
+        self.externo = None;
+        self.al_dia(studio);
     }
 
     /// The turn is over: its last words said, its edits one undo step.
@@ -420,6 +503,7 @@ impl AsistentePane {
         }
         self.estado.clear();
         self.mando = None;
+        self.antes = None;
         self.preguntas.retain(|pregunta| !pregunta.del_turno);
         self.plan = conversacion.plan.clone();
         match resultado {
@@ -482,7 +566,8 @@ impl AsistentePane {
             .iter()
             .map(|linea| AsistenteLineaData {
                 quien: linea.quien as i32,
-                filas: model(filas(&linea.texto, self.columnas)),
+                texto: linea.texto.as_str().into(),
+                rico: model(if linea.quien == Quien::Asistente { rico(&linea.texto) } else { Vec::new() }),
                 meta: linea.meta.as_str().into(),
             })
             .collect();
@@ -591,9 +676,13 @@ impl Trabajo {
 
 /// What a tool does, as the chat shows it while it runs and after. An
 /// outside agent names Komunta's tools after its server
-/// (`mcp__komunta__clip_add`); the last part is the tool.
+/// (`mcp__komunta__clip_add`, Codex `mcp.komunta.clip_add`); the last
+/// part is the tool. Gemini CLI writes its arguments after it
+/// (`timeline_read(path: E:\boda)`).
 fn etiqueta(herramienta: &str) -> String {
+    let herramienta = herramienta.split('(').next().unwrap_or(herramienta).trim();
     let herramienta = herramienta.rsplit("__").next().unwrap_or(herramienta);
+    let herramienta = herramienta.rsplit('.').next().unwrap_or(herramienta);
     let clave = match herramienta {
         "timeline_read" => "timelineRead",
         "edit_undo" => "editUndo",
@@ -621,28 +710,157 @@ fn etiqueta(herramienta: &str) -> String {
         "effect_key_set" => "effectKeySet",
         "media_probe" => "mediaProbe",
         "media_import" => "mediaImport",
+        "carpeta_importar" => "carpetaImportar",
         "project_set_video" => "projectSetVideo",
         "edit_apply" => "editApply",
-        "ver_fotograma" => "verFotograma",
+        // The MCP server's way of looking at a frame, for outside agents.
+        "ver_fotograma" | "preview_frame" => "verFotograma",
         "zoom_en" => "zoomEn",
         "titulo_animado" => "tituloAnimado",
         "texto_detras" => "textoDetras",
         "seguir_cara" => "seguirCara",
+        "animar" => "animar",
+        "efecto" => "efecto",
+        "parallax_foto" => "parallaxFoto",
+        "guion_leer" => "guionLeer",
+        "guion_palabras" => "guionPalabras",
+        "guion_toma_quitar" => "guionTomaQuitar",
+        "guion_toma_mover" => "guionTomaMover",
+        "guion_subtitulo_cambiar" => "guionSubtituloCambiar",
+        "guion_subtitulo_quitar" => "guionSubtituloQuitar",
+        "guion_recurso_quitar" => "guionRecursoQuitar",
+        "guion_descartar" => "guionDescartar",
+        "guion_versiones" => "guionVersiones",
+        "guion_volver" => "guionVolver",
+        "guion_aplicar" => "guionAplicar",
+        "montaje_estado" => "montajeEstado",
+        "montaje_opciones" => "montajeOpciones",
+        "montaje_lanzar" => "montajeLanzar",
+        "montaje_cancelar" => "montajeCancelar",
         otra => return otra.to_owned(),
     };
     t(&format!("asistente.tool.{clave}"))
 }
 
-/// `texto` broken into lines `columnas` wide, its own line breaks kept.
-fn filas(texto: &str, columnas: usize) -> Vec<SharedString> {
-    texto
-        .lines()
-        .flat_map(|parrafo| {
-            let partidas = montaje::guion::lineas(parrafo, columnas);
-            if partidas.is_empty() { vec![String::new()] } else { partidas }
+/// The assistant's words as the pane draws them, piece by piece: the
+/// markdown of each with its bold, italics and code, or its words as they
+/// are when Slint cannot read it.
+fn rico(texto: &str) -> Vec<AsistenteBloqueData> {
+    piezas(texto)
+        .into_iter()
+        .map(|pieza| AsistenteBloqueData {
+            texto: StyledText::from_markdown(&pieza.texto).unwrap_or_else(|_| StyledText::from_plain_text(&pieza.texto)),
+            nivel: pieza.nivel,
+            marca: pieza.marca.into(),
+            arriba: pieza.arriba as f32,
         })
-        .map(SharedString::from)
         .collect()
+}
+
+/// A paragraph, or an item of a list with its mark and how deep it sits.
+#[derive(Debug, PartialEq)]
+struct Pieza {
+    texto: String,
+    nivel: i32,
+    /// "" for a paragraph; the bullet, or the item's number, for a list.
+    marca: String,
+    /// The room over it, in pixels: none for the first, little inside a
+    /// block, more where a blank line parted them.
+    arriba: i32,
+}
+
+/// Room over a piece where a blank line, or a rule, came before it.
+const ENTRE_BLOQUES: i32 = 12;
+/// Room over a piece in the same block as the one before.
+const DENTRO: i32 = 4;
+
+/// The paragraphs and list items of `texto`. Slint's styled text puts no
+/// room between paragraphs, hangs nothing under a bullet - a long item's
+/// lines run back under its mark - and draws no headings and no rules, so
+/// the pane draws each piece itself, with the mark beside it: a heading
+/// becomes a line in bold and a rule parts blocks as a blank line does.
+fn piezas(texto: &str) -> Vec<Pieza> {
+    let mut piezas: Vec<Pieza> = Vec::new();
+    // A blank line, or a rule, since the last piece: the next starts a block.
+    let mut aparte = false;
+    // The last piece takes the next plain line: a paragraph's next line, an
+    // item's indented one.
+    let mut abierta = false;
+    // The indents of the list's open items, outermost first.
+    let mut sangrias: Vec<usize> = Vec::new();
+    let nueva = |piezas: &mut Vec<Pieza>, aparte: &mut bool, texto: String, nivel: i32, marca: String| {
+        let arriba = if piezas.is_empty() { 0 } else if *aparte { ENTRE_BLOQUES } else { DENTRO };
+        piezas.push(Pieza { texto, nivel, marca, arriba });
+        *aparte = false;
+    };
+    for linea in texto.lines() {
+        let llano = linea.trim();
+        let almohadillas = llano.chars().take_while(|c| *c == '#').count();
+        let regla = llano.len() >= 3 && ['-', '*', '_'].iter().any(|c| llano.chars().all(|x| x == *c));
+        if llano.is_empty() || regla {
+            aparte = true;
+            abierta = false;
+            continue;
+        }
+        if (1..=6).contains(&almohadillas) && llano[almohadillas..].starts_with(' ') {
+            nueva(&mut piezas, &mut aparte, titulo(&llano[almohadillas..]), 0, String::new());
+            sangrias.clear();
+            abierta = false;
+        } else if let Some((sangria, marca, resto)) = elemento(linea) {
+            // However many spaces the model indents by, each deeper indent
+            // is one level more.
+            while sangrias.last().is_some_and(|s| *s > sangria) {
+                sangrias.pop();
+            }
+            if sangrias.last() != Some(&sangria) {
+                sangrias.push(sangria);
+            }
+            let nivel = (sangrias.len() - 1).min(3) as i32;
+            let marca = marca.unwrap_or_else(|| ["•", "◦", "▪", "▫"][nivel as usize].to_owned());
+            nueva(&mut piezas, &mut aparte, resto.to_owned(), nivel, marca);
+            abierta = true;
+        } else if abierta && !aparte && !piezas.is_empty() {
+            let ultima = piezas.last_mut().expect("there is one");
+            ultima.texto.push('\n');
+            ultima.texto.push_str(llano);
+        } else {
+            nueva(&mut piezas, &mut aparte, llano.to_owned(), 0, String::new());
+            sangrias.clear();
+            abierta = true;
+        }
+    }
+    piezas
+}
+
+/// A heading's words as a line in bold. Already bold all through, they
+/// stay so; with some of them bold, they are left as they are - wrapped
+/// whole, their own marks would close the bold early and leave a pair over.
+fn titulo(texto: &str) -> String {
+    let texto = texto.trim();
+    let entero = texto.strip_prefix("**").and_then(|t| t.strip_suffix("**")).filter(|t| !t.contains("**"));
+    match entero {
+        Some(dentro) => format!("**{dentro}**"),
+        None if texto.contains("**") => texto.to_owned(),
+        None => format!("**{texto}**"),
+    }
+}
+
+/// A line that is an item of a list: how far it is indented, its number
+/// (none for a bullet) and its words.
+fn elemento(linea: &str) -> Option<(usize, Option<String>, &str)> {
+    let llano = linea.trim_start();
+    let sangria = linea.len() - llano.len();
+    for vineta in ["- ", "* ", "+ "] {
+        if let Some(resto) = llano.strip_prefix(vineta) {
+            return Some((sangria, None, resto.trim()));
+        }
+    }
+    let cifras = llano.chars().take_while(char::is_ascii_digit).count();
+    let tras = &llano[cifras..];
+    if (1..=3).contains(&cifras) && (tras.starts_with(". ") || tras.starts_with(") ")) {
+        return Some((sangria, Some(format!("{}.", &llano[..cifras])), tras[2..].trim()));
+    }
+    None
 }
 
 fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
@@ -664,10 +882,69 @@ mod tests {
         }
     }
 
+    fn pieza(texto: &str, nivel: i32, marca: &str, arriba: i32) -> Pieza {
+        Pieza { texto: texto.to_owned(), nivel, marca: marca.to_owned(), arriba }
+    }
+
     #[test]
-    fn a_text_keeps_its_paragraphs_and_wraps_within_them() {
-        let filas = filas("uno dos tres\n\ncuatro", 7);
-        let filas: Vec<&str> = filas.iter().map(SharedString::as_str).collect();
-        assert_eq!(filas, ["uno dos", "tres", "", "cuatro"]);
+    fn paragraphs_and_items_come_apart_with_their_marks() {
+        let texto = "Hola,\nqué tal:\n\n### Tomas:\n* **Toma 0**\n  * uno\n    que sigue\n\n\n* **Toma 1**\n---\n## **Kits**\n1. primero\n2) segundo\nfin\n";
+        assert_eq!(
+            piezas(texto),
+            [
+                pieza("Hola,\nqué tal:", 0, "", 0),
+                pieza("**Tomas:**", 0, "", ENTRE_BLOQUES),
+                pieza("**Toma 0**", 0, "•", DENTRO),
+                pieza("uno\nque sigue", 1, "◦", DENTRO),
+                pieza("**Toma 1**", 0, "•", ENTRE_BLOQUES),
+                pieza("**Kits**", 0, "", ENTRE_BLOQUES),
+                pieza("primero", 0, "1.", DENTRO),
+                pieza("segundo\nfin", 0, "2.", DENTRO),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_heading_is_bold_once() {
+        assert_eq!(titulo(" Tomas:"), "**Tomas:**");
+        assert_eq!(titulo("**Kits**"), "**Kits**");
+        assert_eq!(titulo("**Toma 0** — base: **IMG_8441** (6,7 s)"), "**Toma 0** — base: **IMG_8441** (6,7 s)");
+    }
+
+    #[test]
+    fn bold_and_numbers_are_not_items() {
+        assert_eq!(elemento("**negrita** sola"), None);
+        assert_eq!(elemento("2024. Un año"), None);
+        assert_eq!(elemento("6.7s"), None);
+        assert_eq!(elemento("  - dos"), Some((2, None, "dos")));
+    }
+
+    #[test]
+    fn the_assistant_s_markdown_reads_as_styled_text() {
+        let rico = rico("**hola** y `código`\n\n* uno\n* dos");
+        assert_eq!(rico.len(), 3);
+        assert!(rico.iter().all(|bloque| bloque.texto != StyledText::default()));
+        assert_eq!(rico[1].marca, "•");
+    }
+
+    #[test]
+    fn an_outside_agent_s_tool_reads_as_komunta_s() {
+        let propia = etiqueta("timeline_read");
+        assert_eq!(etiqueta("mcp__komunta__timeline_read"), propia);
+        assert_eq!(etiqueta("mcp.komunta.timeline_read"), propia);
+        assert_eq!(etiqueta(r"timeline_read(path: E:\boda)"), propia);
+        assert_eq!(etiqueta("mcp.komunta.preview_frame"), etiqueta("ver_fotograma"));
+    }
+
+    #[test]
+    fn the_script_and_montage_tools_have_their_labels() {
+        let nombres = crate::panes::asistente_guion::herramientas()
+            .into_iter()
+            .chain(crate::panes::asistente_montaje::herramientas())
+            .chain(crate::panes::asistente_carpeta::herramientas())
+            .map(|h| h.nombre);
+        for nombre in nombres {
+            assert_ne!(etiqueta(&nombre), nombre, "{nombre} has no label");
+        }
     }
 }

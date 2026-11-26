@@ -576,6 +576,34 @@ impl Default for Toolbox {
     }
 }
 
+/// The window's own tools (`window.tools`: montage, the script, the
+/// agent's recipes), as `tools/list` shows them; none when the backend has
+/// none to offer - headless, or live mode off.
+pub fn window_tools(backend: &mut dyn Backend) -> Vec<Value> {
+    match backend.call(Request::WindowTools) {
+        Ok(Value::Array(tools)) => tools,
+        _ => Vec::new(),
+    }
+}
+
+/// Runs the window's tool `name` on the project its `path` argument names.
+pub fn call_window(name: &str, arguments: Value, backend: &mut dyn Backend) -> Outcome {
+    let Some(path) = arguments.get("path").and_then(Value::as_str).map(str::to_owned) else {
+        return Outcome::error(&ApiError::invalid(format!(
+            "{name} needs the project folder as `path`"
+        )));
+    };
+    let request = Request::WindowTool {
+        path,
+        name: name.to_owned(),
+        arguments,
+    };
+    match backend.call(request) {
+        Ok(value) => Outcome::json(value),
+        Err(error) => Outcome::error(&error),
+    }
+}
+
 /// The schema a tool's arguments follow.
 fn input_schema(schemas: &Schemas, tool: &Tool) -> Option<Value> {
     match tool.action {
@@ -926,6 +954,43 @@ fn preview(mut arguments: Value, backend: &mut dyn Backend) -> Result<Outcome, A
 mod tests {
     use super::*;
     use crate::schema::check;
+
+    /// A window with one tool of its own, which hands back what it was
+    /// asked; or, as `headless`, none.
+    struct Ventana {
+        headless: bool,
+    }
+
+    impl Backend for Ventana {
+        fn call(&mut self, request: Request) -> Result<Value, ApiError> {
+            match request {
+                Request::WindowTools if self.headless => Ok(json!([])),
+                Request::WindowTools => Ok(json!([{"name": "montaje_lanzar", "inputSchema": {}}])),
+                Request::WindowTool { path, name, arguments } => {
+                    Ok(json!({"path": path, "name": name, "arguments": arguments}))
+                }
+                _ => Err(ApiError::invalid("not here")),
+            }
+        }
+
+        fn describe(&self) -> Value {
+            json!({})
+        }
+    }
+
+    #[test]
+    fn the_window_s_own_tools_are_listed_and_called_through_it() {
+        let mut ventana = Ventana { headless: false };
+        let lista = window_tools(&mut ventana);
+        assert_eq!(lista[0]["name"], "montaje_lanzar");
+        let hecho = call_window("montaje_lanzar", json!({"path": "/p", "receta": "boda"}), &mut ventana);
+        assert!(!hecho.is_error);
+        let pedido = hecho.structured.unwrap();
+        assert_eq!((pedido["path"].as_str(), pedido["name"].as_str()), (Some("/p"), Some("montaje_lanzar")));
+        assert_eq!(pedido["arguments"]["receta"], "boda");
+        assert!(call_window("montaje_lanzar", json!({}), &mut ventana).is_error, "no path, no project");
+        assert!(window_tools(&mut Ventana { headless: true }).is_empty());
+    }
 
     /// One call each tool may take, as an agent would write it.
     fn samples() -> Vec<(&'static str, Value)> {

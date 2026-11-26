@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use concat_host::models::SourcePreference;
+use concat_host::vision::{PACKS, Pack};
 use concat_host::updates::{self, Fixed, Installed, Release, Standing, Version};
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -169,6 +170,11 @@ impl ModelState {
 
 /// The models of a kind that are on disk, in the settings' order: the
 /// rows of a sheet's model list.
+/// Whether `id` is one of the picture models' ([`PACKS`]).
+fn is_picture(id: &str) -> bool {
+    Pack::by_id(id).is_some()
+}
+
 pub fn installed(models: &[ModelState]) -> Vec<&ModelState> {
     models.iter().filter(|model| model.installed).collect()
 }
@@ -197,6 +203,11 @@ pub struct SettingsPane {
     pub transcribers: Vec<ModelState>,
     /// The voice models, installed or not.
     pub voices: Vec<ModelState>,
+    /// The picture models - cutouts, the selection brush, the enhancer -
+    /// installed or not.
+    pub pictures: Vec<ModelState>,
+    /// The running picture download's stop flag.
+    pictures_cancel: Arc<AtomicBool>,
     /// The Version page's list: the stable releases from 0.2.5 on, newest
     /// first, once GitHub has been asked.
     pub releases: Vec<Release>,
@@ -386,6 +397,8 @@ impl SettingsPane {
                 studio.prefs.save(&studio.host.dirs);
                 self.apply_server(studio);
             }
+            // A picture model is not a choice: every one is used by its tool.
+            SettingsMsg::ModelActivated(id) if is_picture(&id) => {}
             SettingsMsg::ModelActivated(id) => {
                 if self.is_transcriber(&id) {
                     studio.prefs.transcriber_model = Some(id);
@@ -397,14 +410,18 @@ impl SettingsPane {
             }
             SettingsMsg::ModelDownload(id) => self.download(&id, studio),
             SettingsMsg::ModelCancel(id) => {
-                if self.is_transcriber(&id) {
+                if is_picture(&id) {
+                    self.pictures_cancel.store(true, Ordering::Relaxed);
+                } else if self.is_transcriber(&id) {
                     studio.host.transcriber.cancel_download();
                 } else {
                     studio.host.speech.cancel_download();
                 }
             }
             SettingsMsg::ModelRemove(id) => {
-                let result = if self.is_transcriber(&id) {
+                let result = if let Some(pack) = Pack::by_id(&id) {
+                    pack.remove(&studio.host.dirs.data)
+                } else if self.is_transcriber(&id) {
                     studio.host.transcriber.delete_model(&studio.host.dirs, &id)
                 } else {
                     studio.host.speech.delete_model(&studio.host.dirs, &id)
@@ -436,7 +453,9 @@ impl SettingsPane {
                 match result {
                     Ok(()) => {
                         studio.notify(&t("settings.modelReady"), false);
-                        if self.is_transcriber(&id) && studio.prefs.transcriber_model.is_none() {
+                        if is_picture(&id) {
+                            // Nothing to choose: its tool finds it on disk.
+                        } else if self.is_transcriber(&id) && studio.prefs.transcriber_model.is_none() {
                             studio.prefs.transcriber_model = Some(id.clone());
                         } else if !self.is_transcriber(&id) && studio.prefs.tts_model.is_none() {
                             studio.prefs.tts_model = Some(id.clone());
@@ -713,6 +732,7 @@ impl SettingsPane {
             .transcribers
             .iter()
             .chain(self.voices.iter())
+            .chain(self.pictures.iter())
             .filter(|model| model.fetched.is_some())
             .map(|model| (model.id.clone(), (model.fetched, model.unpacking)))
             .collect();
@@ -769,6 +789,26 @@ impl SettingsPane {
                 })
                 .collect();
         }
+        let data = studio.host.dirs.data.clone();
+        self.pictures = PACKS
+            .iter()
+            .map(|pack| {
+                let (fetched, unpacking) = downloading.get(pack.id).copied().unwrap_or((None, false));
+                let palabra = pack.id.trim_start_matches("vision:");
+                ModelState {
+                    id: pack.id.to_owned(),
+                    name: t(&format!("settings.picture.{palabra}")),
+                    note: format!("{} · {}", t(&format!("settings.pictureUse.{palabra}")), pack.licence()),
+                    megabytes: pack.bytes() as f32 / 1_000_000.0,
+                    // Not a ladder of quality: one model for each job.
+                    accuracy: 0,
+                    installed: pack.installed(&data),
+                    active: false,
+                    fetched,
+                    unpacking,
+                }
+            })
+            .collect();
         // An engine with nothing chosen falls back to whatever is installed,
         // rather than silently having no model at all.
         for list in [&mut self.transcribers, &mut self.voices] {
@@ -788,11 +828,15 @@ impl SettingsPane {
         self.transcribers
             .iter_mut()
             .chain(self.voices.iter_mut())
+            .chain(self.pictures.iter_mut())
             .find(|model| model.id == id)
     }
 
     /// Starts a download on a worker. Its reports come back as messages.
     fn download(&mut self, id: &str, studio: &Studio) {
+        if let Some(pack) = Pack::by_id(id) {
+            return self.download_picture(pack, studio);
+        }
         let transcriber = self.is_transcriber(id);
         let Some(model) = self.model_mut(id) else {
             return;
@@ -827,6 +871,47 @@ impl SettingsPane {
                 studio.handle(Msg::Settings(SettingsMsg::ModelFinished { id, result }));
             },
         );
+    }
+
+    /// Fetches a picture model on a worker, its reports coming back as the
+    /// other downloads' do. One at a time: the stop flag is the list's.
+    fn download_picture(&mut self, pack: Pack, studio: &Studio) {
+        if self.pictures.iter().any(|model| model.fetched.is_some()) {
+            return;
+        }
+        let Some(model) = self.model_mut(pack.id) else {
+            return;
+        };
+        if model.installed {
+            return;
+        }
+        model.fetched = Some(0.0);
+        self.pictures_cancel.store(false, Ordering::Relaxed);
+        let cancel = Arc::clone(&self.pictures_cancel);
+        let data = studio.host.dirs.data.clone();
+        spawn(
+            move || {
+                let id = pack.id.to_owned();
+                let result = pack.download(&data, &cancel, &mut |received, total| {
+                    let msg = SettingsMsg::ModelProgress {
+                        id: id.clone(),
+                        fetched: received as f32 / 1_000_000.0,
+                        total: Some(total as f32 / 1_000_000.0),
+                        unpacking: false,
+                    };
+                    on_ui(move |studio, _, _| studio.handle(Msg::Settings(msg)));
+                });
+                (id, result)
+            },
+            |studio, _, _, (id, result)| {
+                studio.handle(Msg::Settings(SettingsMsg::ModelFinished { id, result }));
+            },
+        );
+    }
+
+    /// The picture list's rows.
+    pub fn picture_rows(&self) -> Vec<ModelData> {
+        self.pictures.iter().map(ModelState::row).collect()
     }
 
     /// The transcriber list's rows.
@@ -896,6 +981,7 @@ impl SettingsPane {
                 let on_disk: Vec<&ModelState> = installed(&self.transcribers)
                     .into_iter()
                     .chain(installed(&self.voices))
+                    .chain(installed(&self.pictures))
                     .collect();
                 let megabytes: f32 = on_disk.iter().map(|model| model.megabytes).sum();
                 tf(

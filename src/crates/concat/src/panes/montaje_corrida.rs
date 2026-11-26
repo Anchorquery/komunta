@@ -68,7 +68,8 @@ impl Corrida {
         self.seguir()?;
         montaje_analisis::analizar(&self.dirs, &self.ia, &trabajo, &self.parada, avisar)?;
         self.seguir()?;
-        montaje_descripcion::describir(&self.datos, &self.env_viejo, &self.ia, &trabajo.carpeta, avisar);
+        let parada = self.parada.bandera();
+        montaje_descripcion::describir(&self.datos, &self.env_viejo, &self.ia, &trabajo.carpeta, parada, avisar);
         self.seguir()
     }
 

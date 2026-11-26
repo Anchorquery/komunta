@@ -8,10 +8,10 @@
 // the agent's mode - and the send button, which is Stop while a turn
 // runs. The agent itself is picked at the top. The conversation reads
 // upwards from the field, the newest line always in sight: the person's
-// words in a card on the right, the assistant's as plain text, each tool
-// it used ticked off between them; while a turn runs, three dots and what
-// the AI is doing close it. With nothing said yet, a few requests to
-// start from. Everything one turn does is undone with one Ctrl+Z.
+// words in a bubble on the right, the assistant's with their markdown
+// drawn under its mark and name, each tool it used a slim pill; while a turn runs,
+// three dots and what the AI is doing close it. With nothing said yet,
+// a few requests to start from. Everything one turn does is undone with one Ctrl+Z.
 //
 // The state is all Rust's (`panes::asistente`), in the `AsistentePanel`
 // global, so two seats showing the chat are one chat.
@@ -25,13 +25,27 @@ import { Select } from "../primitives/select.slint";
 import { Pane, PaneHeader } from "pane.slint";
 import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
 
-/// One thing said, broken into lines by Rust: Slint has no flowing text
-/// inside a layout that measures it.
+/// A paragraph of the assistant's words, or an item of a list in them.
+export struct AsistenteBloqueData {
+    /// Its words with their markdown read: bold, italics, code.
+    texto: styled-text,
+    /// How deep in the list it sits.
+    nivel: int,
+    /// "" for a paragraph; the bullet, or the number, of an item.
+    marca: string,
+    /// The room over it.
+    arriba: length,
+}
+
+/// One thing said.
 export struct AsistenteLineaData {
     /// 0 the person, 1 the assistant, 2 the window (a failure, a notice),
     /// 3 a tool the assistant used.
     quien: int,
-    filas: [string],
+    texto: string,
+    /// The assistant's words piece by piece: Slint puts no room between
+    /// paragraphs and hangs nothing under a bullet, so the pane does.
+    rico: [AsistenteBloqueData],
     /// Small print under it: how long the turn took.
     meta: string,
 }
@@ -68,8 +82,8 @@ export global AsistentePanel {
     /// The choices under the field, for that agent.
     in property <[AsistenteOpcionData]> options;
 
-    /// The pane is this many characters wide, near enough.
-    callback resized(columns: int);
+    /// The pane is on screen.
+    callback shown();
     callback send(text: string);
     /// A new conversation.
     callback clear();
@@ -179,27 +193,71 @@ component Aprobar inherits Rectangle {
     }
 }
 
-// The conversation's measures. Rust breaks the lines (Slint has no
-// flowing text inside a layout that measures it), at about as many
-// characters as fit across the person's card - the narrowest text - at
-// the mean width of a character of the body size.
+// The conversation's measures, on a 4px rhythm.
 global Medidas {
-    out property <length> texto: Theme.fs-xl;
-    out property <length> letra: 6.9px;
+    out property <length> texto: Theme.fs-lg;
     /// The conversation's side padding.
     out property <length> lado: 14px;
-    /// Inside the person's card.
+    /// Inside the person's bubble.
     out property <length> relleno: 12px;
-    /// How far the person's card stays from the left edge.
-    out property <length> sangria: 16px;
+    /// How far the person's bubble stays from the left edge, at the least.
+    out property <length> sangria: 36px;
+    /// Room between turns, and between the lines of one turn.
+    out property <length> entre-turnos: 20px;
+    out property <length> en-turno: 10px;
+    /// How far each level of a list sits in, and the room for an item's
+    /// mark - a bullet, or a number of up to two figures.
+    out property <length> nivel: 14px;
+    out property <length> marca: 18px;
+}
+
+// The assistant's mark: a sparkle on the accent's wash.
+component Avatar inherits Rectangle {
+    in property <length> size: 22px;
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: Theme.accent-soft;
+
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        glyph: Glyph.sparkle;
+        size: root.size * 0.58;
+        tint: Theme.accent;
+    }
+}
+
+// Who speaks from here on: the agent's mark and name, over its turn.
+component Cabecera inherits HorizontalLayout {
+    in property <string> nombre;
+
+    alignment: start;
+    spacing: 8px;
+
+    Avatar { }
+
+    Text {
+        text: root.nombre;
+        color: Theme.fg;
+        font-size: Theme.fs-lg;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
 }
 
 // The conversation, held to its bottom edge: when it outgrows the pane the
 // oldest lines go off the top, and the wheel brings them back.
 component ChatScroll inherits Rectangle {
+    // How tall the conversation is, read from where its end landed. Its
+    // preferred height falls short: Slint measures each line of a `for` at
+    // one line of text when it sums them, though it lays each out at the
+    // width it gets - and the end of a long answer went under the field.
+    property <length> alto: fin.y + content.padding-bottom;
     // How far up from the newest line the person has scrolled, clamped on
     // read so a shorter conversation cannot leave it past the top.
-    property <length> overflow: Math.max(0px, content.preferred-height - root.height);
+    property <length> overflow: Math.max(0px, root.alto - root.height);
     property <length> back;
     property <length> at: Math.min(root.overflow, Math.max(0px, root.back));
 
@@ -215,69 +273,175 @@ component ChatScroll inherits Rectangle {
         // its parent's constraints, so the conversation's height does not
         // cap the pane's - it did, and the field rose to the middle of a
         // pane with little said.
+        // Its own height stays the short one and nothing in it stretches,
+        // so the lines run past it as tall as they are, and its end is
+        // where they really end.
         content := VerticalLayout {
             x: 0;
-            y: Math.min(0px, root.height - self.preferred-height) + root.at;
+            y: Math.min(0px, root.height - root.alto) + root.at;
             width: root.width;
             height: self.preferred-height;
+            alignment: start;
             padding-left: Medidas.lado;
             padding-right: Medidas.lado;
-            padding-top: 14px;
-            padding-bottom: 14px;
-            spacing: 14px;
+            padding-top: 16px;
+            padding-bottom: 20px;
 
             @children
+
+            fin := Rectangle { height: 0px; }
+        }
+    }
+
+    // The lines fade out at the edges instead of being cut: at the bottom
+    // always, over the field; at the top once older lines are up there.
+    Rectangle {
+        y: root.height - self.height;
+        height: 20px;
+        background: @linear-gradient(180deg, Theme.panel.with-alpha(0) 0%, Theme.panel 100%);
+    }
+
+    if root.overflow > root.at + 1px: Rectangle {
+        y: 0;
+        height: 20px;
+        background: @linear-gradient(180deg, Theme.panel 0%, Theme.panel.with-alpha(0) 100%);
+    }
+
+    // A slim bar at the right edge once there is more than fits: where the
+    // lines on screen sit in the whole conversation. It firms up under the
+    // pointer, and dragging anywhere along the edge scrolls.
+    if root.overflow > 0: Rectangle {
+        property <length> pista: root.height - 8px;
+        property <length> largo: Math.max(28px, self.pista * root.height / root.alto);
+        // From the top of the conversation to the top of the screen.
+        property <length> desde-arriba: root.overflow - root.at;
+        // Where the press began, and how far scrolled up it was then.
+        property <length> agarre;
+        property <length> al-agarrar;
+
+        x: root.width - self.width;
+        width: 12px;
+
+        Rectangle {
+            x: parent.width - self.width - 3px;
+            y: 4px + (parent.pista - parent.largo) * parent.desde-arriba / root.overflow;
+            width: barra.has-hover || barra.pressed ? 6px : 4px;
+            height: parent.largo;
+            border-radius: self.width / 2;
+            background: barra.pressed ? Theme.fg-muted : barra.has-hover ? Theme.fg-dim : Theme.line-strong;
+            animate width, background { duration: 150ms; easing: ease-out; }
+        }
+
+        barra := TouchArea {
+            // Over the bar the wheel scrolls too.
+            scroll-event(event) => {
+                root.back = Math.min(root.overflow, Math.max(0px, root.at + event.delta-y));
+                return EventResult.accept;
+            }
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    parent.agarre = self.mouse-y;
+                    parent.al-agarrar = root.at;
+                }
+            }
+            moved => {
+                if (self.pressed && parent.pista > parent.largo) {
+                    // The thumb goes down as the conversation goes up.
+                    let bajada = (self.mouse-y - parent.agarre) * root.overflow / (parent.pista - parent.largo);
+                    root.back = Math.min(root.overflow, Math.max(0px, parent.al-agarrar - bajada));
+                }
+            }
         }
     }
 }
 
-// Rows of text, as Rust broke them.
-component Filas inherits VerticalLayout {
-    in property <[string]> filas;
-    in property <color> color: Theme.fg;
-    in property <length> size: Medidas.texto;
-
-    spacing: 3px;
-
-    for fila in root.filas: Text {
-        text: fila;
-        color: root.color;
-        font-size: root.size;
-    }
-}
-
-// The person's words: a card on the right.
-component Persona inherits HorizontalLayout {
+// The person's words: a bubble on the accent's wash at the right, as wide
+// as they are up to most of the pane, its corner by the edge tucked in.
+// Measured by hand, not by a layout: a layout sized the bubble for the
+// words wrapped at one width and then wrapped them at a narrower one, so
+// the last line ran into its bottom edge and the longest into its right.
+component Persona inherits Rectangle {
     in property <AsistenteLineaData> line;
 
-    alignment: end;
-    padding-left: Medidas.sangria;
+    // The words inside: as wide as they are unbroken - a pixel more, so
+    // the widest line does not wrap on a rounding - up to the pane less
+    // the indent on the left.
+    property <length> interior: Math.max(0px, Math.min(
+        medida.preferred-width + 1px,
+        root.width - Medidas.sangria - 2 * Medidas.relleno));
+    property <length> vertical: 8px;
+
+    height: texto.preferred-height + 2 * root.vertical;
+
+    medida := Text {
+        text: root.line.texto;
+        font-size: Medidas.texto;
+        visible: false;
+    }
 
     Rectangle {
-        border-radius: Theme.r-lg;
-        background: Theme.raised;
-        border-width: 1px;
-        border-color: Theme.line;
+        x: parent.width - self.width;
+        y: 0px;
+        width: root.interior + 2 * Medidas.relleno;
+        height: parent.height;
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+        border-bottom-left-radius: 16px;
+        border-bottom-right-radius: 4px;
+        background: Theme.accent-soft;
 
-        VerticalLayout {
-            padding-left: Medidas.relleno;
-            padding-right: Medidas.relleno;
-            padding-top: 9px;
-            padding-bottom: 9px;
-
-            Filas { filas: root.line.filas; }
+        texto := Text {
+            x: Medidas.relleno;
+            y: root.vertical;
+            width: root.interior;
+            height: self.preferred-height;
+            text: root.line.texto;
+            color: Theme.fg;
+            font-size: Medidas.texto;
+            wrap: word-wrap;
         }
     }
 }
 
-// The assistant's words: plain text across the pane, with how long the
-// turn took under them.
+// The assistant's words: no bubble, read across the pane - each paragraph
+// with its room, each item of a list with its mark beside it and its lines
+// hung under its words - with how long the turn took under them.
 component Asistente inherits VerticalLayout {
     in property <AsistenteLineaData> line;
 
-    spacing: 5px;
+    spacing: 8px;
 
-    Filas { filas: root.line.filas; }
+    VerticalLayout {
+        // The words in a column of their own, the mark placed by hand in
+        // the room left of them: beside the words in a row, the words were
+        // measured as wide as the row, and a line that only just wrapped
+        // was given no room and ran over what came under it.
+        for bloque in root.line.rico: VerticalLayout {
+            padding-top: bloque.arriba;
+            padding-left: bloque.nivel * Medidas.nivel + (bloque.marca != "" ? Medidas.marca : 0px);
+
+            // No height of its own: the mark hangs off it, into the room
+            // the padding left.
+            if bloque.marca != "": Rectangle {
+                height: 0px;
+
+                Text {
+                    x: -Medidas.marca;
+                    y: 0px;
+                    text: bloque.marca;
+                    color: Theme.fg-dim;
+                    font-size: Medidas.texto;
+                }
+            }
+
+            StyledText {
+                text: bloque.texto;
+                default-color: Theme.fg;
+                default-font-size: Medidas.texto;
+                link-color: Theme.accent;
+            }
+        }
+    }
 
     if root.line.meta != "": Text {
         text: root.line.meta;
@@ -286,27 +450,49 @@ component Asistente inherits VerticalLayout {
     }
 }
 
-// A tool the assistant used, ticked off: one quiet row.
+// A tool the assistant used, ticked off: a slim pill with what it did.
 component Accion inherits HorizontalLayout {
     in property <AsistenteLineaData> line;
 
     alignment: start;
-    spacing: 8px;
 
-    VerticalLayout {
-        alignment: start;
-        padding-top: 2px;
-        Icon {
-            glyph: Glyph.check;
-            size: 12px;
-            tint: Theme.green;
+    Rectangle {
+        border-radius: 11px;
+        background: Theme.field;
+
+        HorizontalLayout {
+            padding-left: 7px;
+            padding-right: 10px;
+            padding-top: 3px;
+            padding-bottom: 3px;
+            spacing: 6px;
+
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                    background: Theme.green.with-alpha(0.18);
+
+                    Icon {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        glyph: Glyph.check;
+                        size: 9px;
+                        tint: Theme.green;
+                    }
+                }
+            }
+
+            Text {
+                text: root.line.texto;
+                color: Theme.fg-muted;
+                font-size: Theme.fs;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
         }
-    }
-
-    Filas {
-        filas: root.line.filas;
-        color: Theme.fg-muted;
-        size: Theme.fs-lg;
     }
 }
 
@@ -332,10 +518,11 @@ component Aviso inherits Rectangle {
             }
         }
 
-        Filas {
-            filas: root.line.filas;
+        Text {
+            text: root.line.texto;
             color: Theme.fg;
-            size: Theme.fs-lg;
+            font-size: Theme.fs-lg;
+            wrap: word-wrap;
         }
     }
 }
@@ -379,22 +566,32 @@ component Sugerencia inherits Rectangle {
     in property <string> text;
     callback send(text: string);
 
-    min-height: 38px;
+    min-height: 40px;
     border-radius: Theme.r-lg;
-    background: touch.has-hover ? Theme.field-hover : Colors.transparent;
-    border-width: 1px;
-    border-color: touch.has-hover ? Theme.line-strong : Theme.line;
+    background: touch.pressed ? Theme.field-active : touch.has-hover ? Theme.field-hover : Theme.field;
+    animate background { duration: 150ms; easing: ease-out; }
 
     HorizontalLayout {
         padding-left: 12px;
-        padding-right: 12px;
+        padding-right: 10px;
+        spacing: 8px;
 
         Text {
+            horizontal-stretch: 1;
             text: root.text;
             color: touch.has-hover ? Theme.fg : Theme.fg-muted;
             font-size: Theme.fs-lg;
             vertical-alignment: center;
             overflow: elide;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: Glyph.arrow-up-right;
+                size: 13px;
+                tint: touch.has-hover ? Theme.accent : Theme.fg-dim;
+            }
         }
     }
 
@@ -404,8 +601,9 @@ component Sugerencia inherits Rectangle {
     }
 }
 
-// Nothing said yet: a question, a line on how it works, and three
-// requests to start from, in the middle of the pane above the field.
+// Nothing said yet: the assistant's mark, a question, a line on how it
+// works, and three requests to start from, in the middle of the pane
+// above the field.
 component Bienvenida inherits VerticalLayout {
     in property <bool> enabled: true;
     callback send(text: string);
@@ -414,6 +612,12 @@ component Bienvenida inherits VerticalLayout {
     padding-left: Medidas.lado;
     padding-right: Medidas.lado;
     spacing: 10px;
+
+    HorizontalLayout {
+        alignment: start;
+        padding-bottom: 4px;
+        Avatar { size: 36px; }
+    }
 
     Text {
         text: I18n.t("asistente.helloTitle");
@@ -613,12 +817,7 @@ export component AsistentePane inherits Pane {
     callback pane-picked(kind: PaneKind);
     callback pane-removed();
 
-    // About how many characters fit across the person's card, for Rust to
-    // break the lines by.
-    property <int> columnas: Math.max(16, Math.floor(
-        (self.width - 2 * Medidas.lado - Medidas.sangria - 2 * Medidas.relleno - 6px) / Medidas.letra));
-    changed columnas => { AsistentePanel.resized(self.columnas); }
-    init => { AsistentePanel.resized(self.columnas); }
+    init => { AsistentePanel.shown(); }
 
     // The agent picked at the top, where the title would be: it is what
     // the pane is.
@@ -671,15 +870,37 @@ export component AsistentePane inherits Pane {
     if AsistentePanel.lines.length > 0 || AsistentePanel.busy: ChatScroll {
         vertical-stretch: 1;
 
-        for line in AsistentePanel.lines: VerticalLayout {
+        // Each turn of the assistant opens under its mark and name; turns
+        // stand apart, the lines of one turn close together, a run of
+        // tools closer still.
+        for line[i] in AsistentePanel.lines: fila := VerticalLayout {
+            property <int> antes: i > 0 ? AsistentePanel.lines[i - 1].quien : -1;
+            property <bool> abre: line.quien != 0 && (i == 0 || fila.antes == 0);
+
+            padding-top: i == 0 ? 0px
+                : line.quien == 0 || fila.abre ? Medidas.entre-turnos
+                : line.quien == 3 && fila.antes == 3 ? 4px
+                : Medidas.en-turno;
+            spacing: Medidas.en-turno;
+
+            if fila.abre: Cabecera { nombre: AsistentePanel.agents[AsistentePanel.agent]; }
             if line.quien == 0: Persona { line: line; }
             if line.quien == 1: Asistente { line: line; }
             if line.quien == 2: Aviso { line: line; }
             if line.quien == 3: Accion { line: line; }
         }
 
-        if AsistentePanel.busy: Escribiendo {
-            status: AsistentePanel.status != "" ? AsistentePanel.status : I18n.t("asistente.thinking");
+        if AsistentePanel.busy: pensando := VerticalLayout {
+            property <bool> abre: AsistentePanel.lines.length == 0
+                || AsistentePanel.lines[AsistentePanel.lines.length - 1].quien == 0;
+
+            padding-top: AsistentePanel.lines.length == 0 ? 0px : pensando.abre ? Medidas.entre-turnos : Medidas.en-turno;
+            spacing: Medidas.en-turno;
+
+            if pensando.abre: Cabecera { nombre: AsistentePanel.agents[AsistentePanel.agent]; }
+            Escribiendo {
+                status: AsistentePanel.status != "" ? AsistentePanel.status : I18n.t("asistente.thinking");
+            }
         }
     }
 

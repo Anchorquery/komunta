@@ -160,6 +160,9 @@ pub struct MontajePrefs {
     /// are in the system's credential store, not here.
     #[serde(flatten)]
     pub ia: montaje::Ia,
+    /// The Montaje pane's guide was closed once, skipped or read to the
+    /// end: it is not opened by itself again, only from its help button.
+    pub guia_vista: bool,
 }
 
 /// The voiceover panel's choices, kept from one take to the next and one

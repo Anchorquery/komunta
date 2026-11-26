@@ -19,8 +19,12 @@ pub const CEREBROS: [&str; 7] = [
     "manual",
 ];
 
-/// Who describes the clips to the planner.
-pub const DESCRIPCIONES: [&str; 4] = ["auto", "google", "anthropic", "ninguno"];
+/// Who describes the clips to the planner: an API with its key, or a
+/// command-line AI on the subscription signed in, with none.
+pub const DESCRIPCIONES: [&str; 7] = ["auto", "google", "anthropic", "codex", "gemini_cli", "claude_code", "ninguno"];
+
+/// How hard Codex thinks: "" leaves it as Codex is set.
+pub const ESFUERZOS_CODEX: [&str; 5] = ["", "low", "medium", "high", "xhigh"];
 
 /// How hard Claude thinks over the plan.
 pub const ESFUERZOS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
@@ -55,12 +59,15 @@ pub struct Ia {
     pub cerebro: Option<String>,
     /// Who takes over, in order, when the planner fails.
     pub respaldo: Option<Vec<String>>,
-    /// The model per API provider, by the provider's id.
+    /// The model per API provider, by the provider's id, and Codex's
+    /// under "codex".
     pub modelos: BTreeMap<String, String>,
     /// Claude's effort, for the Anthropic API.
     pub esfuerzo: Option<String>,
     /// Who describes the clips ([`DESCRIPCIONES`]).
     pub descripcion: Option<String>,
+    /// How hard Codex thinks, planning or describing ([`ESFUERZOS_CODEX`]).
+    pub esfuerzo_codex: Option<String>,
     /// The whisper that hears Spanish, by its ggml id.
     pub transcripcion_es: Option<String>,
     /// The whisper that hears Basque, by its ggml id.
@@ -102,6 +109,9 @@ impl Ia {
         if let Some(esfuerzo) = &self.esfuerzo {
             poner("ia.anthropic.esfuerzo".into(), esfuerzo.clone().into());
         }
+        if let Some(esfuerzo) = self.esfuerzo_codex.as_ref().filter(|e| !e.is_empty()) {
+            poner("ia.codex.esfuerzo".into(), esfuerzo.clone().into());
+        }
         match self.descripcion.as_deref() {
             Some("ninguno") => poner("descripcion.modo".into(), "ninguno".into()),
             Some(proveedor) => {
@@ -134,6 +144,7 @@ mod tests {
             modelos: BTreeMap::from([("anthropic".into(), "claude-sonnet-5-5".into())]),
             esfuerzo: Some("medium".into()),
             descripcion: Some("google".into()),
+            esfuerzo_codex: Some("low".into()),
             transcripcion_es: Some("large-v3-turbo-q5_0".into()),
             transcripcion_eu: None,
         };
@@ -143,6 +154,7 @@ mod tests {
                 "ia.respaldo": ["google"],
                 "ia.anthropic.modelo": "claude-sonnet-5-5",
                 "ia.anthropic.esfuerzo": "medium",
+                "ia.codex.esfuerzo": "low",
                 "descripcion.modo": "auto",
                 "descripcion.proveedor": "google"
             })

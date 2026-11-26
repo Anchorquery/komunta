@@ -15,10 +15,10 @@ use crate::panes::montaje::{datos, env_viejo};
 use crate::studio::Studio;
 
 /// The Gemini models the agent asks, in order, before the montage's:
-/// Flash, good with tools and quick with little thinking. 3.5 first: on
-/// the free tier 3.8 is often overloaded and hangs without a word
-/// (November 2026).
-const GEMINI: [&str; 2] = ["gemini-3.5-flash", "gemini-3.8-flash"];
+/// Flash, good with tools and quick with little thinking, the newest
+/// first. A hang that looked like 3.8's was a reused connection waiting
+/// with no limit, and is gone (November 2026).
+const GEMINI: [&str; 2] = ["gemini-3.8-flash", "gemini-3.5-flash"];
 
 /// The AI for the agent's next turn, or why there is none: the model
 /// chosen under the field asked first, thinking as much as chosen there.
@@ -77,8 +77,21 @@ fn modelos_de(studio: &Studio, proveedor: montaje::Proveedor) -> Vec<String> {
         return vec![ia.modelo(proveedor).to_owned()];
     }
     let del_montaje = montaje::descripcion::modelos(proveedor, ia, &datos(studio).ajustes(ia));
+    con_los_del_montaje(del_montaje)
+}
+
+/// [`GEMINI`], and then the montage's models that are neither those nor
+/// of a generation before Gemini 3: the montage keeps 2.5 Flash as its
+/// last resort, which the person asked the chat not to fall back to - it
+/// says the quota is spent instead.
+fn con_los_del_montaje(del_montaje: Vec<String>) -> Vec<String> {
+    let viejo = |modelo: &str| modelo.starts_with("gemini-1") || modelo.starts_with("gemini-2");
     let mut modelos: Vec<String> = GEMINI.map(str::to_owned).into();
-    modelos.extend(del_montaje.into_iter().filter(|modelo| !GEMINI.contains(&modelo.as_str())));
+    modelos.extend(
+        del_montaje
+            .into_iter()
+            .filter(|modelo| !GEMINI.contains(&modelo.as_str()) && !viejo(modelo)),
+    );
     modelos
 }
 
@@ -109,6 +122,15 @@ mod tests {
         assert_eq!(elegido(&con_cerebro("openai")), montaje::Proveedor::OpenAi);
         assert_eq!(elegido(&con_cerebro("claude_code")), montaje::Proveedor::Google);
         assert_eq!(elegido(&Ia::default()), montaje::Proveedor::Google);
+    }
+
+    #[test]
+    fn the_chat_asks_the_newest_flash_first_and_never_an_old_generation() {
+        let del_montaje = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.5-flash"].map(str::to_owned);
+        assert_eq!(
+            con_los_del_montaje(del_montaje.into()),
+            ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest"]
+        );
     }
 
     #[test]

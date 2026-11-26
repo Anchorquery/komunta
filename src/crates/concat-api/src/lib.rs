@@ -374,11 +374,12 @@ impl Api {
     /// window's.
     fn live_call(&self, request: &Request) -> Option<Result<Reply, ApiError>> {
         let (window, switch) = self.live.as_ref()?;
-        let path = live::live_path(request)?;
-        if !switch.is_on() || self.open.holder(path) != Some(Holder::Window) {
-            return None;
-        }
-        Some(window.call(request.clone()))
+        let suya = match live::live_path(request) {
+            Some(path) => self.open.holder(path) == Some(Holder::Window),
+            // Not about a project: what the window has to offer.
+            None => matches!(request, Request::WindowTools),
+        };
+        (switch.is_on() && suya).then(|| window.call(request.clone()))
     }
 
     /// Confines every write to `roots`: from here on a created project, an
@@ -519,6 +520,12 @@ impl Api {
                     None => Ok(Reply::Picture(self.picture(&path, time, size)?)),
                 }
             }
+            // Without the window in live mode there are none.
+            Request::WindowTools => Ok(Reply::Tools(Vec::new())),
+            Request::WindowTool { name, .. } => Err(ApiError::new(
+                ErrorCode::NotOpen,
+                format!("{name} is the window's: open the project in Komunta, with live mode on"),
+            )),
         }
     }
 

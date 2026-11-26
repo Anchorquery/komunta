@@ -33,6 +33,12 @@ use crate::proveedor::{Esfuerzo, Modo, Pedido, Proveedor};
 /// the free tier, November 2026), and is better left soon.
 const ESPERA: Duration = Duration::from_secs(30);
 
+/// How long one call may take from sending to the last byte. Google keeps
+/// a call to a model it has too much demand for waiting before it answers
+/// 503 - 12 s, 71 s, 244 s in November 2026 - and the person is looking at
+/// «Pensando…» meanwhile: past this the next model is asked.
+const PLAZO: Duration = Duration::from_secs(45);
+
 /// What Gemini 3 takes in place of the signature of a call it did not
 /// sign - one an older model made, before the turn moved to a newer one.
 const SIN_FIRMA: &str = "skip_thought_signature_validator";
@@ -50,7 +56,7 @@ impl Gemini {
     /// in the quota kept in `cuota`.
     pub fn new(clave: String, modelos: Vec<String>, cuota: PathBuf) -> Self {
         Self {
-            cliente: google::Gemini::new(clave, ESPERA),
+            cliente: google::Gemini::new(clave, ESPERA).con_plazo(PLAZO),
             modelos,
             cuota: Cuota::en(cuota),
             esfuerzo: Esfuerzo::Bajo,

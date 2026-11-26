@@ -4,10 +4,12 @@
 //! The agent's own tools, beyond concat-mcp's: looking at a frame, and the
 //! animation recipes of `crates/animacion` - a zoom on a phrase, a title
 //! that comes in with a style, a title behind the person, a title that
-//! follows a face. Each reads the
+//! follows a face, free keys, the named moves (a pop, a shake, a slide...)
+//! and a photo's parallax. Each reads the
 //! project and applies the recipe's commands through a [`Lienzo`]: the
 //! window when the agent runs, an editor of its own in the tests.
 
+use animacion::movimiento::{self, Curva, Efecto, Lado as LadoEntrada, Punto};
 use animacion::titulo::{self, Entrada};
 use animacion::seguir::{self, Caja, Lado, Muestra};
 use animacion::zoom::{self, Estilo, Zoom};
@@ -36,6 +38,9 @@ const ZOOM_EN: &str = "zoom_en";
 const TITULO_ANIMADO: &str = "titulo_animado";
 const TEXTO_DETRAS: &str = "texto_detras";
 const SEGUIR_CARA: &str = "seguir_cara";
+const ANIMAR: &str = "animar";
+const EFECTO: &str = "efecto";
+const PARALLAX_FOTO: &str = "parallax_foto";
 
 /// Where a title stands, as `offsetY` from the middle of the frame.
 const POSICIONES: [(&str, f64); 3] = [("arriba", -0.3), ("centro", 0.0), ("abajo", 0.3)];
@@ -137,12 +142,97 @@ pub fn herramientas() -> Vec<Herramienta> {
             Clase::Edicion,
             "animacion",
         ),
+        Herramienta::nueva(
+            ANIMAR,
+            "Anima un clip con fotogramas clave libres: para cada propiedad, los puntos por los que pasa \
+             (segundo de la línea de tiempo y valor) y la curva con la que llega a cada uno. Valores: escala \
+             (1 = llena el cuadro), x e y (fracción del cuadro desde el centro; y positiva hacia abajo), giro \
+             (grados, horario) y opacidad (0..1). Reemplaza las claves que el clip tenga en esas propiedades \
+             entre el primer punto y el último. Para movimientos típicos usa «efecto».",
+            json!({
+                "type": "object",
+                "properties": {
+                    "clipId": {"type": "string"},
+                    "pistas": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "propiedad": {"type": "string", "enum": movimiento::PROPIEDADES.map(|(n, _)| n)},
+                                "puntos": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "t": {"type": "number", "description": "segundo de la línea de tiempo"},
+                                            "valor": {"type": "number"},
+                                            "curva": {"type": "string", "enum": Curva::NOMBRES, "description": "cómo llega a este punto; lineal por defecto"},
+                                            "bezier": {
+                                                "type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4,
+                                                "description": "curva propia [x1, y1, x2, y2] como en CSS, en vez de «curva»"
+                                            }
+                                        },
+                                        "required": ["t", "valor"]
+                                    }
+                                }
+                            },
+                            "required": ["propiedad", "puntos"]
+                        }
+                    }
+                },
+                "required": ["clipId", "pistas"]
+            }),
+            Clase::Edicion,
+            "animacion",
+        ),
+        Herramienta::nueva(
+            EFECTO,
+            "Aplica a un clip (vídeo, foto o título) un movimiento hecho: rebote (entra pequeño y se pasa), \
+             sacudida (tiembla y para), pulso (late dos veces por segundo), deslizar (entra desde fuera por un \
+             lado), giro (entra girando) o deriva (Ken Burns: acercamiento lento con desplazamiento). Empieza y \
+             acaba en el encuadre del clip.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "clipId": {"type": "string"},
+                    "efecto": {"type": "string", "enum": Efecto::NOMBRES},
+                    "desde": {"type": "number", "description": "por defecto, el principio del clip"},
+                    "hasta": {"type": "number", "description": "por defecto, su final"},
+                    "intensidad": {"type": "number", "minimum": 0.2, "maximum": 3, "description": "1 por defecto"},
+                    "lado": {"type": "string", "enum": LadoEntrada::NOMBRES, "description": "para deslizar; izquierda por defecto"}
+                },
+                "required": ["clipId", "efecto"]
+            }),
+            Clase::Edicion,
+            "animacion",
+        ),
+        Herramienta::nueva(
+            PARALLAX_FOTO,
+            "Da profundidad a una foto o a un plano quieto (efecto 2.5D): copia el clip encima, recorta en la \
+             copia a la persona o al objeto principal, y anima el fondo y el sujeto con movimientos distintos. \
+             El recorte se calcula en segundo plano; hasta entonces se ve la foto entera moviéndose.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "clipId": {"type": "string"},
+                    "desde": {"type": "number", "description": "por defecto, el principio del clip"},
+                    "hasta": {"type": "number", "description": "por defecto, su final"},
+                    "intensidad": {"type": "number", "minimum": 0.2, "maximum": 3, "description": "1 por defecto"},
+                    "sujeto": {"type": "string", "enum": ["auto", "persona", "objeto"], "description": "auto por defecto"}
+                },
+                "required": ["clipId"]
+            }),
+            Clase::Edicion,
+            "animacion",
+        ),
     ]
 }
 
 /// Whether `nombre` is one of these tools.
 pub fn es_receta(nombre: &str) -> bool {
-    [VER_FOTOGRAMA, ZOOM_EN, TITULO_ANIMADO, TEXTO_DETRAS, SEGUIR_CARA].contains(&nombre)
+    [VER_FOTOGRAMA, ZOOM_EN, TITULO_ANIMADO, TEXTO_DETRAS, SEGUIR_CARA, ANIMAR, EFECTO, PARALLAX_FOTO].contains(&nombre)
 }
 
 /// Runs the tool `nombre` with `argumentos` on `lienzo`.
@@ -153,6 +243,9 @@ pub fn ejecutar(lienzo: &mut dyn Lienzo, nombre: &str, argumentos: &Value) -> Sa
         TITULO_ANIMADO => titulo_animado(lienzo, argumentos),
         TEXTO_DETRAS => texto_detras(lienzo, argumentos),
         SEGUIR_CARA => seguir_cara(lienzo, argumentos),
+        ANIMAR => animar(lienzo, argumentos),
+        EFECTO => efecto(lienzo, argumentos),
+        PARALLAX_FOTO => parallax_foto(lienzo, argumentos),
         otra => Err(format!("no hay ninguna receta «{otra}»")),
     };
     match resultado {
@@ -245,15 +338,110 @@ fn poner_titulo(
     Ok(id)
 }
 
-/// The title over the clip, then a copy of the person, cut out, over the
-/// title: the person stands in front of the words.
-fn texto_detras(lienzo: &mut dyn Lienzo, argumentos: &Value) -> Result<Value, String> {
+/// The free keys of `argumentos` on its clip.
+fn animar(lienzo: &mut dyn Lienzo, argumentos: &Value) -> Result<Value, String> {
     let clip = clip_de(lienzo, argumentos)?;
-    if clip.kind != ClipKind::Video && clip.kind != ClipKind::Image {
-        return Err(format!("{} no es un vídeo ni una foto: no hay persona que recortar", clip.id));
+    let pistas = argumentos["pistas"].as_array().filter(|p| !p.is_empty()).ok_or("falta «pistas»")?;
+    let mut comandos = Vec::new();
+    let mut claves = 0;
+    for pista in pistas {
+        let nombre = pista["propiedad"].as_str().unwrap_or_default();
+        let propiedad = movimiento::propiedad(nombre).ok_or_else(|| {
+            let nombres: Vec<&str> = movimiento::PROPIEDADES.iter().map(|(n, _)| *n).collect();
+            format!("«{nombre}» no es una propiedad: {}", nombres.join(", "))
+        })?;
+        let puntos = pista["puntos"]
+            .as_array()
+            .ok_or_else(|| format!("faltan los «puntos» de {nombre}"))?
+            .iter()
+            .map(punto_de)
+            .collect::<Result<Vec<_>, String>>()?;
+        claves += puntos.len();
+        comandos.extend(movimiento::claves(&clip, propiedad, &puntos)?);
     }
-    let (desde, hasta) = tiempo::tramo(&clip, tramo_de(argumentos)?.0, tramo_de(argumentos)?.1)?;
-    let titulo = poner_titulo(lienzo, argumentos, desde, hasta, -0.05, 0.2)?;
+    lienzo.aplicar(Command::Batch { commands: comandos })?;
+    Ok(json!({"clipId": clip.id, "claves": claves}))
+}
+
+/// One point of a track: `t`, `valor` and its curve, named or a bezier.
+fn punto_de(punto: &Value) -> Result<Punto, String> {
+    let (Some(t), Some(valor)) = (punto["t"].as_f64(), punto["valor"].as_f64()) else {
+        return Err("cada punto lleva «t» y «valor»".into());
+    };
+    let curva = match (punto["bezier"].as_array(), punto["curva"].as_str()) {
+        (Some(bezier), _) => {
+            let numeros: Vec<f64> = bezier.iter().filter_map(Value::as_f64).collect();
+            let cuatro: [f64; 4] = numeros.try_into().map_err(|_| "«bezier» son cuatro números")?;
+            Curva::Propia(cuatro)
+        }
+        (None, None) => Curva::Lineal,
+        (None, Some(nombre)) => Curva::por_nombre(nombre)
+            .ok_or_else(|| format!("«{nombre}» no es una curva: {}", Curva::NOMBRES.join(", ")))?,
+    };
+    Ok(Punto { t, valor, curva })
+}
+
+/// The named move of `argumentos` on its clip.
+fn efecto(lienzo: &mut dyn Lienzo, argumentos: &Value) -> Result<Value, String> {
+    let clip = clip_de(lienzo, argumentos)?;
+    let nombre = argumentos["efecto"].as_str().ok_or("falta «efecto»")?;
+    let lado = match argumentos["lado"].as_str() {
+        None => None,
+        Some(lado) => Some(
+            LadoEntrada::por_nombre(lado)
+                .ok_or_else(|| format!("«{lado}» no es un lado: {}", LadoEntrada::NOMBRES.join(", ")))?,
+        ),
+    };
+    let movimiento = Efecto::por_nombre(nombre, lado)
+        .ok_or_else(|| format!("«{nombre}» no es un efecto: {}", Efecto::NOMBRES.join(", ")))?;
+    let (desde, hasta) = tramo_o_clip(&clip, argumentos);
+    let intensidad = argumentos["intensidad"].as_f64().unwrap_or(1.0);
+    let comandos = movimiento::efecto(&clip, movimiento, desde, hasta, intensidad)?;
+    lienzo.aplicar(Command::Batch { commands: comandos })?;
+    Ok(json!({"clipId": clip.id, "efecto": nombre, "desde": desde, "hasta": hasta}))
+}
+
+/// A photo given depth: the clip as the background, a copy above it with
+/// the subject cut out, and the two keyed to move apart.
+fn parallax_foto(lienzo: &mut dyn Lienzo, argumentos: &Value) -> Result<Value, String> {
+    let clip = clip_de(lienzo, argumentos)?;
+    let sujeto = match argumentos["sujeto"].as_str() {
+        None | Some("auto") => Subject::Auto,
+        Some("persona") => Subject::Person,
+        Some("objeto") => Subject::Object,
+        Some(otro) => return Err(format!("«{otro}» no es un sujeto: auto, persona, objeto")),
+    };
+    let (desde, hasta) = tramo_o_clip(&clip, argumentos);
+    let intensidad = argumentos["intensidad"].as_f64().unwrap_or(1.0);
+    let (desde, hasta) = tiempo::tramo(&clip, desde, hasta)?;
+    let (copia, pista) = copia_recortada(lienzo, &clip, desde, hasta, sujeto)?;
+    let proyecto = lienzo.proyecto()?;
+    let (fondo, recortada) = (buscar(&proyecto, &clip.id)?, buscar(&proyecto, &copia)?);
+    let comandos = movimiento::parallax(&fondo, &recortada, desde, hasta, intensidad)?;
+    lienzo.aplicar(Command::Batch { commands: comandos })?;
+    Ok(json!({"fondoId": clip.id, "sujetoId": copia, "pista": pista, "desde": desde, "hasta": hasta}))
+}
+
+/// The stretch `argumentos` say, or the whole of `clip`.
+fn tramo_o_clip(clip: &Clip, argumentos: &Value) -> (f64, f64) {
+    (
+        argumentos["desde"].as_f64().unwrap_or(clip.start),
+        argumentos["hasta"].as_f64().unwrap_or(clip.start + clip.duration),
+    )
+}
+
+/// A copy of `clip` over `desde..hasta` on a new lane above everything,
+/// muted, with `sujeto` cut out of it; the copy's id and its lane.
+fn copia_recortada(
+    lienzo: &mut dyn Lienzo,
+    clip: &Clip,
+    desde: f64,
+    hasta: f64,
+    sujeto: Subject,
+) -> Result<(String, String), String> {
+    if clip.kind != ClipKind::Video && clip.kind != ClipKind::Image {
+        return Err(format!("{} no es un vídeo ni una foto: no hay nada que recortar", clip.id));
+    }
     let pista = lienzo
         .aplicar(Command::AddTrack { bottom: false })?
         .ok_or("no se pudo añadir una pista")?;
@@ -266,12 +454,12 @@ fn texto_detras(lienzo: &mut dyn Lienzo, argumentos: &Value) -> Result<Value, St
         })?
         .ok_or("no se pudo copiar el clip")?;
     let puesta = buscar(&lienzo.proyecto()?, &colocada)?;
-    let mut comandos = copia::comandos(&copia::tramo(&clip, desde, hasta), &puesta, &pista, desde);
+    let mut comandos = copia::comandos(&copia::tramo(clip, desde, hasta), &puesta, &pista, desde);
     comandos.push(Command::SetClipCutout {
         clip_id: colocada.clone(),
         cutout: Some(Cutout {
             mode: CutoutMode::Auto,
-            subject: Subject::Person,
+            subject: sujeto,
             ..recorte_por_defecto()
         }),
     });
@@ -283,6 +471,19 @@ fn texto_detras(lienzo: &mut dyn Lienzo, argumentos: &Value) -> Result<Value, St
         },
     });
     lienzo.aplicar(Command::Batch { commands: comandos })?;
+    Ok((colocada, pista))
+}
+
+/// The title over the clip, then a copy of the person, cut out, over the
+/// title: the person stands in front of the words.
+fn texto_detras(lienzo: &mut dyn Lienzo, argumentos: &Value) -> Result<Value, String> {
+    let clip = clip_de(lienzo, argumentos)?;
+    if clip.kind != ClipKind::Video && clip.kind != ClipKind::Image {
+        return Err(format!("{} no es un vídeo ni una foto: no hay persona que recortar", clip.id));
+    }
+    let (desde, hasta) = tiempo::tramo(&clip, tramo_de(argumentos)?.0, tramo_de(argumentos)?.1)?;
+    let titulo = poner_titulo(lienzo, argumentos, desde, hasta, -0.05, 0.2)?;
+    let (colocada, pista) = copia_recortada(lienzo, &clip, desde, hasta, Subject::Person)?;
     Ok(json!({"tituloId": titulo, "personaId": colocada, "pista": pista}))
 }
 
@@ -495,6 +696,56 @@ mod tests {
         assert!(xs.len() > 5 && xs.windows(2).all(|par| par[1] >= par[0]), "{xs:?}");
         let no = ejecutar(&mut mesa, SEGUIR_CARA, &json!({"tituloId": clip}));
         assert!(no.valor.as_str().unwrap().contains("no es un título"));
+    }
+
+    #[test]
+    fn free_keys_move_the_clip_through_its_points() {
+        let (mut mesa, clip) = mesa();
+        let salida = ejecutar(
+            &mut mesa,
+            ANIMAR,
+            &json!({"clipId": clip, "pistas": [
+                {"propiedad": "giro", "puntos": [{"t": 1, "valor": 0}, {"t": 2, "valor": 30, "curva": "rebote"}]},
+                {"propiedad": "x", "puntos": [{"t": 1, "valor": 0}, {"t": 3, "valor": 0.2, "bezier": [0.2, 0, 0.2, 1]}]}
+            ]}),
+        );
+        assert!(salida.ok(), "{:?}", salida.valor);
+        assert_eq!(salida.valor["claves"], 4);
+        assert_eq!(mesa.0.project().active().clip(&clip).unwrap().keys.len(), 4);
+        let mal = ejecutar(
+            &mut mesa,
+            ANIMAR,
+            &json!({"clipId": clip, "pistas": [{"propiedad": "brillo", "puntos": []}]}),
+        );
+        assert!(mal.valor.as_str().unwrap().contains("brillo"));
+    }
+
+    #[test]
+    fn a_named_move_covers_the_whole_clip_when_no_stretch_is_said() {
+        let (mut mesa, clip) = mesa();
+        let salida = ejecutar(&mut mesa, EFECTO, &json!({"clipId": clip, "efecto": "deriva"}));
+        assert!(salida.ok(), "{:?}", salida.valor);
+        assert_eq!((salida.valor["desde"].as_f64(), salida.valor["hasta"].as_f64()), (Some(0.0), Some(10.0)));
+        let mal = ejecutar(&mut mesa, EFECTO, &json!({"clipId": clip, "efecto": "volar"}));
+        assert!(mal.valor.as_str().unwrap().contains("volar"));
+    }
+
+    #[test]
+    fn a_parallax_is_the_photo_below_and_its_subject_cut_out_above_moving_apart() {
+        let (mut mesa, clip) = mesa();
+        let salida = ejecutar(
+            &mut mesa,
+            PARALLAX_FOTO,
+            &json!({"clipId": clip, "desde": 0, "hasta": 4, "sujeto": "objeto"}),
+        );
+        assert!(salida.ok(), "{:?}", salida.valor);
+        let linea = mesa.0.project().active().clone();
+        let fondo = linea.clip(&clip).unwrap();
+        let sujeto = linea.clip(salida.valor["sujetoId"].as_str().unwrap()).unwrap();
+        let fila = |pista: &str| linea.tracks.iter().position(|t| t.id == pista).unwrap();
+        assert!(fila(&fondo.track_id) < fila(&sujeto.track_id));
+        assert_eq!(sujeto.cutout.as_ref().unwrap().subject, Subject::Object);
+        assert!(!fondo.keys.is_empty() && !sujeto.keys.is_empty());
     }
 
     #[test]

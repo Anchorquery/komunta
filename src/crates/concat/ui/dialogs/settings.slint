@@ -100,6 +100,11 @@ export struct MontajeSettingsData {
     /// Who describes the clips.
     describer: int,
     describers: [string],
+    /// Codex's model, planning or describing: empty is Codex's own.
+    codex-model: string,
+    /// How hard Codex thinks: 0 is Codex's own.
+    codex-effort: int,
+    codex-efforts: [string],
     providers: [ProveedorIaData],
     /// The whisper models for each language.
     whisper-es: int,
@@ -207,7 +212,9 @@ component ModelMeta inherits HorizontalLayout {
 
     spacing: 10px;
 
-    VerticalLayout {
+    // A model that is one of a kind - not a rung of a quality ladder -
+    // carries no pips.
+    if root.model.accuracy > 0: VerticalLayout {
         alignment: center;
         Pips { value: root.model.accuracy; }
     }
@@ -644,6 +651,8 @@ export component SettingsDialog inherits Modal {
     callback montaje-choice(field: string, index: int);
     callback montaje-action(name: string);
     in property <[ModelData]> transcribers;
+    /// the picture models: cutouts, the selection brush, the enhancer
+    in property <[ModelData]> pictures;
     in property <[ModelData]> voices;
     /// the releases a person can switch to, newest first, and beside each
     /// the day it came out - or that it is this one
@@ -1277,6 +1286,19 @@ export component SettingsDialog inherits Modal {
                         }
                     }
                 }
+
+                DialogSection {
+                    title: I18n.t("settings.pictures");
+                    hint: I18n.t("settings.picturesHint");
+
+                    for model in root.pictures: ModelRow {
+                        compact: root.compact;
+                        model: model;
+                        download => { root.model-download(model.id); }
+                        cancel => { root.model-cancel(model.id); }
+                        remove => { root.model-remove(model.id); }
+                    }
+                }
             }
 
             if root.data.tab == 3: VerticalLayout {
@@ -1753,6 +1775,18 @@ export component SettingsDialog inherits Modal {
                     }
                 }
 
+                // Which AI does what, from the chat on: the chat's agent is
+                // the same choice as on the Automation page.
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("settings.panelAgent");
+                    hint: I18n.t("settings.panelAgentHint");
+                    choices: ["Komunta", "Gemini CLI", "Claude Code", "Codex"];
+                    choice: root.data.panel-agent;
+                    chose(index) => { root.panel-agent-changed(index); }
+                    open: false;
+                }
+
                 DialogSection {
                     ruled: false;
                     title: I18n.t("montaje.brain");
@@ -1913,6 +1947,33 @@ export component SettingsDialog inherits Modal {
                         options: root.montaje.describers;
                         current: root.montaje.describer;
                         changed(index) => { root.montaje-choice("describer", index); }
+                    }
+                }
+
+                // Codex on the ChatGPT sign-in, no key: its model and how
+                // hard it thinks, for planning and describing alike.
+                DialogSection {
+                    ruled: false;
+                    title: I18n.t("montaje.codex");
+                    hint: I18n.t("montaje.codexHint");
+
+                    Field {
+                        value: root.montaje.codex-model;
+                        placeholder: I18n.t("montaje.codexModel");
+                        technical: true;
+                        edited(text) => { root.montaje-edited("codex-model", text); }
+                    }
+
+                    Text {
+                        text: I18n.t("montaje.codexEffort");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                    }
+
+                    Select {
+                        options: root.montaje.codex-efforts;
+                        current: root.montaje.codex-effort;
+                        changed(index) => { root.montaje-choice("codex-effort", index); }
                     }
                 }
 

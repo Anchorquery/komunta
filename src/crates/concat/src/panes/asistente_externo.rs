@@ -16,6 +16,17 @@ use std::path::{Path, PathBuf};
 use asistente::externo::{Agente, Ajuste, Servidor, Sesion};
 use asistente::{Conversacion, Fin, Persona};
 
+/// The model Gemini CLI runs on in Komunta: the newest Flash, quick with
+/// tools.
+const MODELO_GEMINI: &str = "gemini-3.8-flash";
+
+/// What Komunta changes in Codex's settings for its sessions (the
+/// codex-acp adapter reads them as JSON from `CODEX_CONFIG`): no skills.
+/// With the person's 466 it overran its budget for them and said so in
+/// the chat, in English, on every first turn (November 2026); Komunta's
+/// tools are all it needs.
+const AJUSTES_CODEX: &str = r#"{"skills":{"include_instructions":false,"bundled":{"enabled":false}}}"#;
+
 /// The agents the pane can hold besides Komunta's own, by the id the
 /// preferences keep and the name the person sees.
 pub const AGENTES: [(&str, &str); 3] = [("gemini", "Gemini CLI"), ("claude", "Claude Code"), ("codex", "Codex")];
@@ -23,22 +34,57 @@ pub const AGENTES: [(&str, &str); 3] = [("gemini", "Gemini CLI"), ("claude", "Cl
 /// How to start the agent `id`. The Node ones go through `npx`, which
 /// fetches them the first time. Gemini CLI is handed Komunta's Google key,
 /// when there is one, and signed in with it: its own Google sign-in for
-/// individuals is gone (November 2026). Claude Code and Codex use the
-/// account they are signed in with.
-pub fn agente(id: &str, clave_google: Option<String>) -> Option<Agente> {
+/// individuals is gone (November 2026). It is also told to trust the
+/// project's folder: in a folder it does not trust it starts no MCP
+/// server, Komunta's included, and has no tools to edit with. And it reads
+/// Komunta's own settings for it, `ajustes_gemini` ([`ajustes_gemini`]),
+/// over the person's. Claude Code and Codex use the account they are
+/// signed in with (Codex, a ChatGPT plan: no API), Codex without skills
+/// ([`AJUSTES_CODEX`]).
+pub fn agente(id: &str, clave_google: Option<String>, ajustes_gemini: Option<&Path>) -> Option<Agente> {
     let (orden, argumentos): (&str, &[&str]) = match id {
         "gemini" => ("gemini", &["--acp"]),
         "claude" => ("npx", &["-y", "@agentclientprotocol/claude-agent-acp"]),
         "codex" => ("npx", &["-y", "@agentclientprotocol/codex-acp"]),
         _ => return None,
     };
-    let clave = clave_google.filter(|_| id == "gemini");
+    let gemini = id == "gemini";
+    let clave = clave_google.filter(|_| gemini);
+    let mut entorno: Vec<(String, String)> = Vec::new();
+    if gemini {
+        entorno.push(("GEMINI_CLI_TRUST_WORKSPACE".to_owned(), "true".to_owned()));
+        // Its settings' model went unheeded in ACP: it asked 3.1 Pro.
+        entorno.push(("GEMINI_MODEL".to_owned(), MODELO_GEMINI.to_owned()));
+        if let Some(ajustes) = ajustes_gemini {
+            let ruta = ajustes.display().to_string();
+            entorno.push(("GEMINI_CLI_SYSTEM_SETTINGS_PATH".to_owned(), ruta));
+        }
+    }
+    if id == "codex" {
+        entorno.push(("CODEX_CONFIG".to_owned(), AJUSTES_CODEX.to_owned()));
+    }
+    let acceso = clave.is_some().then(|| "gemini-api-key".to_owned());
+    entorno.extend(clave.map(|clave| ("GEMINI_API_KEY".to_owned(), clave)));
     Some(Agente {
         orden: programa(orden),
         argumentos: argumentos.iter().map(|&argumento| argumento.to_owned()).collect(),
-        acceso: clave.is_some().then(|| "gemini-api-key".to_owned()),
-        entorno: clave.map(|clave| ("GEMINI_API_KEY".to_owned(), clave)).into_iter().collect(),
+        acceso,
+        entorno,
     })
+}
+
+/// Writes Gemini CLI's settings for Komunta in `carpeta`, and says where:
+/// they weigh over the person's own (Gemini CLI reads them as the
+/// system's). No skills: Gemini
+/// CLI puts every skill it finds in each request, 124 000 tokens with the
+/// 712 of `~/.agents/skills` (November 2026), past the free tier's
+/// 250 000 a minute in two calls - and Komunta's tools are all it needs.
+pub fn ajustes_gemini(carpeta: &Path) -> std::io::Result<PathBuf> {
+    let ajustes = serde_json::json!({"skills": {"enabled": false}});
+    std::fs::create_dir_all(carpeta)?;
+    let ruta = carpeta.join("gemini-cli.json");
+    std::fs::write(&ruta, serde_json::to_string_pretty(&ajustes)?)?;
+    Ok(ruta)
 }
 
 /// npm's programs are `.cmd` scripts on Windows, which a process is not
@@ -151,7 +197,9 @@ fn contexto(ruta: &Path, texto: &str) -> String {
         "La persona tiene abierto en Komunta, un editor de vídeo, el proyecto de la carpeta «{}». \
 Edítalo con las herramientas del servidor MCP «komunta», pasando esa carpeta como `path`: \
 cada cambio se ve al momento en la ventana y se deshace con Ctrl+Z. \
-Mira cómo queda con preview_frame. No guardes, cierres ni exportes el proyecto: eso es de la persona. \
+Mira cómo queda con preview_frame. Para montar un vídeo con IA a partir de una carpeta de material \
+(también de Google Drive para escritorio, G:\\…) usa montaje_lanzar con esa carpeta como «material». \
+No guardes, cierres ni exportes el proyecto: eso es de la persona. \
 Contesta en su idioma.\n\n{texto}",
         ruta.display()
     )
@@ -164,13 +212,40 @@ mod tests {
     #[test]
     fn every_agent_listed_can_be_started_and_komunta_s_own_is_not_one() {
         for (id, _) in AGENTES {
-            let agente = agente(id, None).expect(id);
+            let agente = agente(id, None, None).expect(id);
             assert!(!agente.argumentos.is_empty());
         }
-        assert!(agente("", None).is_none());
-        let gemini = agente("gemini", Some("k".into())).unwrap();
+        assert!(agente("", None, None).is_none());
+        let ajustes = Path::new("/datos/gemini-cli.json");
+        let gemini = agente("gemini", Some("k".into()), Some(ajustes)).unwrap();
         assert_eq!(gemini.acceso.as_deref(), Some("gemini-api-key"));
-        assert!(agente("claude", Some("k".into())).unwrap().entorno.is_empty(), "the key is Google's");
+        let confia = ("GEMINI_CLI_TRUST_WORKSPACE".to_owned(), "true".to_owned());
+        assert!(gemini.entorno.contains(&confia), "else it starts no MCP server");
+        assert!(gemini.entorno.iter().any(|(nombre, _)| nombre == "GEMINI_CLI_SYSTEM_SETTINGS_PATH"));
+        let modelo = ("GEMINI_MODEL".to_owned(), MODELO_GEMINI.to_owned());
+        assert!(gemini.entorno.contains(&modelo));
+        let claude = agente("claude", Some("k".into()), Some(ajustes)).unwrap();
+        assert!(claude.entorno.is_empty(), "the key and the settings are Gemini's");
+    }
+
+    #[test]
+    fn codex_runs_on_its_sign_in_without_skills() {
+        let codex = agente("codex", Some("k".into()), None).unwrap();
+        assert!(codex.acceso.is_none(), "it uses the ChatGPT sign-in, not a key");
+        let (nombre, valor) = codex.entorno.iter().find(|(nombre, _)| nombre == "CODEX_CONFIG").unwrap();
+        assert_eq!(nombre, "CODEX_CONFIG");
+        let ajustes: serde_json::Value = serde_json::from_str(valor).unwrap();
+        assert_eq!(ajustes["skills"]["include_instructions"], false);
+        assert!(!codex.entorno.iter().any(|(nombre, _)| nombre.starts_with("GEMINI")));
+    }
+
+    #[test]
+    fn gemini_cli_s_settings_take_no_skills() {
+        let carpeta = std::env::temp_dir().join(format!("komunta-gemini-cli-{}", std::process::id()));
+        let ruta = ajustes_gemini(&carpeta).unwrap();
+        let ajustes: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&ruta).unwrap()).unwrap();
+        assert_eq!(ajustes["skills"]["enabled"], false);
+        let _ = std::fs::remove_dir_all(&carpeta);
     }
 
     #[test]

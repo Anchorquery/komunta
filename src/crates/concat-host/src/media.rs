@@ -138,6 +138,12 @@ impl MediaSummary {
     }
 }
 
+/// The files the Import dialog offers: footage, sound and stills.
+pub const MEDIA_EXTENSIONS: [&str; 20] = [
+    "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "aac", "m4a", "flac", "ogg", "png",
+    "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff",
+];
+
 /// Extensions Concat is willing to treat as stills.
 const IMAGE_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "avif", "heic", "heif", "gif",

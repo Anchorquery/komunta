@@ -70,9 +70,17 @@ pub struct AjustesIa {
 }
 
 impl AjustesIa {
-    /// A field typed into: a provider's key, as `key:<provider>`.
-    pub fn editado(&mut self, campo: &str, texto: String) {
-        if let Some(proveedor) = proveedor_de(campo, "key") {
+    /// A field typed into: a provider's key, as `key:<provider>`, or
+    /// Codex's model, kept as typed (empty is Codex's own).
+    pub fn editado(&mut self, campo: &str, texto: String, studio: &mut Studio) {
+        if campo == "codex-model" {
+            let modelos = &mut studio.prefs.montaje.ia.modelos;
+            match texto.trim() {
+                "" => modelos.remove("codex"),
+                modelo => modelos.insert("codex".to_owned(), modelo.to_owned()),
+            };
+            studio.prefs.save(&studio.host.dirs);
+        } else if let Some(proveedor) = proveedor_de(campo, "key") {
             self.estado(proveedor).borrador = texto;
         }
     }
@@ -102,6 +110,12 @@ impl AjustesIa {
                 elegida.respaldo = Some(respaldo);
             }
             "effort" => elegida.esfuerzo = ia::ESFUERZOS.get(indice).map(|e| (*e).to_owned()),
+            "codex-effort" => {
+                elegida.esfuerzo_codex = ia::ESFUERZOS_CODEX
+                    .get(indice)
+                    .filter(|e| !e.is_empty())
+                    .map(|e| (*e).to_owned())
+            }
             "describer" => {
                 elegida.descripcion = ia::DESCRIPCIONES.get(indice).map(|d| (*d).to_owned())
             }
@@ -275,8 +289,18 @@ impl AjustesIa {
         datos.describers = strings(
             ia::DESCRIPCIONES
                 .iter()
-                .map(|d| t(&format!("montaje.describer.{d}"))),
+                .map(|d| t(&format!("montaje.describer.{}", d.replace('_', "")))),
         );
+        datos.codex_model = ia.modelos.get("codex").cloned().unwrap_or_default().into();
+        let esfuerzo_codex = ia.esfuerzo_codex.as_deref().unwrap_or("");
+        datos.codex_effort = ia::ESFUERZOS_CODEX
+            .iter()
+            .position(|e| *e == esfuerzo_codex)
+            .unwrap_or(0) as i32;
+        datos.codex_efforts = strings(ia::ESFUERZOS_CODEX.iter().map(|e| match *e {
+            "" => t("montaje.codexEffortDefault"),
+            esfuerzo => t(&format!("montaje.effort.{esfuerzo}")),
+        }));
         datos.providers = ModelRc::new(VecModel::from(
             Proveedor::TODOS
                 .iter()

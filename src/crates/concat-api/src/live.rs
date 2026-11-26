@@ -43,8 +43,8 @@ impl LiveSwitch {
 }
 
 /// The project folder a request acts on, for the methods live mode hands
-/// to the window: reading it, editing it, importing into it and looking
-/// at its frames. Saving, closing and exporting the window's project stay
+/// to the window: reading it, editing it, importing into it, looking at
+/// its frames and running the window's own tools on it. Saving, closing and exporting the window's project stay
 /// the person's.
 pub fn live_path(request: &Request) -> Option<&str> {
     match request {
@@ -56,7 +56,8 @@ pub fn live_path(request: &Request) -> Option<&str> {
         | Request::EditUndo { path }
         | Request::EditRedo { path }
         | Request::MediaImport { path, .. }
-        | Request::PreviewFrame { path, .. } => Some(path),
+        | Request::PreviewFrame { path, .. }
+        | Request::WindowTool { path, .. } => Some(path),
         _ => None,
     }
 }

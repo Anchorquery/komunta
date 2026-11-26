@@ -408,6 +408,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         app.set_voiceover_devices(ModelRc::from(models.voiceover_devices.clone()));
         app.set_app_menu_items(ModelRc::from(models.bar.clone()));
         app.set_transcribers(ModelRc::from(models.transcribers.clone()));
+        app.set_pictures(ModelRc::from(models.pictures.clone()));
         app.set_voices(ModelRc::from(models.voices.clone()));
         app.set_versions(ModelRc::from(models.versions.clone()));
         app.set_version_details(ModelRc::from(models.version_details.clone()));
@@ -706,6 +707,18 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     guion.on_apply(on_window!(|state| {
         state.handle(Msg::Guion(GuionMsg::Apply));
     }));
+    guion.on_guide_next(on_window!(|state| {
+        state.handle(Msg::Guion(GuionMsg::GuideNext));
+    }));
+    guion.on_guide_back(on_window!(|state| {
+        state.handle(Msg::Guion(GuionMsg::GuideBack));
+    }));
+    guion.on_guide_close(on_window!(|state| {
+        state.handle(Msg::Guion(GuionMsg::GuideClose));
+    }));
+    guion.on_guide_open(on_window!(|state| {
+        state.handle(Msg::Guion(GuionMsg::GuideOpen));
+    }));
     guion.on_montage(on_window!(|state| {
         state.handle(Msg::Montaje(MontajeMsg::Open));
     }));
@@ -724,8 +737,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         state.handle(Msg::Asistente(AsistenteMsg::Toggle));
     }));
     let asistente = app.global::<AsistentePanel>();
-    asistente.on_resized(on_window!(|state, columns: i32| {
-        state.handle(Msg::Asistente(AsistenteMsg::Resized(columns)));
+    asistente.on_shown(on_window!(|state| {
+        state.handle(Msg::Asistente(AsistenteMsg::Shown));
     }));
     asistente.on_send(on_window!(|state, text: SharedString| {
         state.handle(Msg::Asistente(AsistenteMsg::Send(text.to_string())));
@@ -958,13 +971,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
             }
             host::pick_files_then(
                 i18n::t("lib.importMedia"),
-                Some((
-                    i18n::t("common.media"),
-                    &[
-                        "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "aac", "m4a",
-                        "flac", "ogg", "png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff",
-                    ],
-                )),
+                Some((i18n::t("common.media"), &concat_host::media::MEDIA_EXTENSIONS)),
                 |studio, _, _, paths| studio.handle(Msg::Media(MediaMsg::Import(paths))),
             );
         });

@@ -244,6 +244,27 @@ pub enum Request {
         #[serde(default)]
         height: Option<u32>,
     },
+
+    /// The window's own tools, beyond the methods here: montage with AI,
+    /// the script and the agent's recipes, as the window's agent has them,
+    /// each with its description and the JSON Schema of its arguments.
+    /// Only the window in live mode has them; anywhere else the list is
+    /// empty.
+    #[serde(rename = "window.tools")]
+    WindowTools,
+    /// Runs one of [`Request::WindowTools`] on the project open on screen.
+    /// One that spends or writes outside the project waits for the
+    /// person's yes in the agent's pane.
+    #[serde(rename = "window.tool")]
+    WindowTool {
+        /// The project folder: the one open in the window.
+        path: String,
+        /// The tool's name.
+        name: String,
+        /// Its arguments, as its schema says.
+        #[serde(default)]
+        arguments: Value,
+    },
 }
 
 /// One template slot and the file that takes it.
@@ -335,6 +356,11 @@ pub enum Reply {
     Picture(Picture),
     /// Methods with nothing to say beyond having worked.
     Done(Done),
+    /// [`Request::WindowTools`]: each tool's name, description and
+    /// `inputSchema`.
+    Tools(Vec<Value>),
+    /// [`Request::WindowTool`]: what the tool gave.
+    Tool(Value),
 }
 
 /// The build and the contract it speaks.

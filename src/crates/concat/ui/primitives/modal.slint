@@ -295,6 +295,9 @@ export component Button inherits Rectangle {
     /// sits beside a field and says what it does with its mark: the eye
     /// that shows a token. The label, if one is given, is not drawn.
     in property <bool> square;
+    /// What a tooltip says about it when the pointer rests on it, greyed
+    /// out or not: the moment "why is this off?" is worth answering.
+    in property <string> tip;
 
     callback clicked();
 
@@ -381,6 +384,11 @@ export component Button inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+
+    Tip {
+        text: root.tip;
+        active: touch.has-hover;
     }
 
     FocusRing {

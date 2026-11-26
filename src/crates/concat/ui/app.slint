@@ -267,6 +267,7 @@ export component App inherits Window {
     in property <ExportData> export;
     in property <SettingsData> settings;
     in property <[ModelData]> transcribers;
+    in property <[ModelData]> pictures;
     in property <[ModelData]> voices;
     in property <[string]> versions;
     in property <[string]> version-details;
@@ -919,6 +920,7 @@ export component App inherits Window {
         montaje-choice(field, index) => { root.montaje-setting-choice(field, index); }
         montaje-action(name) => { root.montaje-setting-action(name); }
         transcribers: root.transcribers;
+        pictures: root.pictures;
         voices: root.voices;
         versions: root.versions;
         version-details: root.version-details;

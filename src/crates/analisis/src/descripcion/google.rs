@@ -17,6 +17,10 @@ const API: &str = "https://generativelanguage.googleapis.com";
 /// uploaded first, which does not count as a request.
 pub const MAX_EN_LINEA: u64 = 18 << 20;
 
+/// How long sending a request may take: a video inline is up to
+/// [`MAX_EN_LINEA`], and an upload more.
+const ENVIO: Duration = Duration::from_secs(5 * 60);
+
 /// A failed call: the HTTP status, when there was an answer, and what it
 /// said.
 #[derive(Clone, Debug, PartialEq)]
@@ -216,6 +220,9 @@ fn recortar(texto: &str) -> String {
 pub struct Gemini {
     clave: String,
     agente: ureq::Agent,
+    /// How long a whole `generateContent` call may take: sending, waiting
+    /// for the answer and reading it.
+    plazo: Duration,
 }
 
 impl Gemini {
@@ -223,13 +230,33 @@ impl Gemini {
     /// says nothing until the whole answer is ready, so the wait for the
     /// first byte is the wait for the answer; a model that hangs then
     /// fails as no answer, and the next model is asked.
+    ///
+    /// Every call has a limit of its own besides, the time to send it and
+    /// `espera` ([`ENVIO`] + `espera`): ureq 2 keeps connections for the
+    /// next call and takes their read limit off when it does, so on a
+    /// connection used again the wait for the answer had no limit at all.
+    /// An overloaded model Google keeps waiting before its 503 then held
+    /// the call for as long as Google did - 71 s and 244 s, November 2026.
+    /// The call's own limit is applied to every read, kept connection or
+    /// not.
     pub fn new(clave: String, espera: Duration) -> Self {
         let agente = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(20))
-            .timeout_write(Duration::from_secs(5 * 60))
+            .timeout_write(ENVIO)
             .timeout_read(espera)
             .build();
-        Self { clave, agente }
+        Self {
+            clave,
+            agente,
+            plazo: ENVIO + espera,
+        }
+    }
+
+    /// The same, each call given up after `plazo` all told: a person in
+    /// a chat is waiting for it.
+    pub fn con_plazo(mut self, plazo: Duration) -> Self {
+        self.plazo = plazo;
+        self
     }
 
     /// The video at `ruta` as a request part, at `fps` frames a second:
@@ -269,6 +296,7 @@ impl Gemini {
         self.agente
             .post(&format!("{API}/v1beta/models/{modelo}:generateContent"))
             .set("x-goog-api-key", &self.clave)
+            .timeout(self.plazo)
             .send_json(cuerpo)
             .map_err(Fallo::de)?
             .into_json()
@@ -286,6 +314,7 @@ impl Gemini {
             .set("X-Goog-Upload-Command", "start")
             .set("X-Goog-Upload-Header-Content-Length", &tamano.to_string())
             .set("X-Goog-Upload-Header-Content-Type", "video/mp4")
+            .timeout(self.plazo)
             .send_json(json!({"file": {"display_name": "contacto"}}))
             .map_err(Fallo::de)?;
         let destino = inicio.header("x-goog-upload-url").map(str::to_owned).ok_or_else(|| Fallo {
@@ -309,6 +338,7 @@ impl Gemini {
                 .agente
                 .get(&format!("{API}/v1beta/{nombre}"))
                 .set("x-goog-api-key", &self.clave)
+                .timeout(self.plazo)
                 .call()
                 .map_err(Fallo::de)?
                 .into_json()

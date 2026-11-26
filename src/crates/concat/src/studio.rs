@@ -683,6 +683,7 @@ pub struct Models {
     pub voices_builtin: Rc<VecModel<crate::ui::VoiceCardData>>,
     pub voice_styles: Rc<VecModel<crate::ui::VoiceCardData>>,
     pub transcribers: Rc<VecModel<ModelData>>,
+    pub pictures: Rc<VecModel<ModelData>>,
     pub voices: Rc<VecModel<ModelData>>,
     /// The Version page's releases, and beside each its day or that it
     /// is this one.
@@ -758,6 +759,7 @@ impl Models {
             voices_builtin: Rc::new(VecModel::default()),
             voice_styles: Rc::new(VecModel::default()),
             transcribers: Rc::new(VecModel::default()),
+            pictures: Rc::new(VecModel::default()),
             voices: Rc::new(VecModel::default()),
             versions: Rc::new(VecModel::default()),
             version_details: Rc::new(VecModel::default()),
@@ -8100,6 +8102,7 @@ impl Studio {
                 // Komunta: a montage opens with its script where the
                 // library was, unless the script is already up.
                 self.guion.load(std::path::Path::new(&info.path));
+                self.guion.open_guide_once(self.prefs.montaje.guia_vista);
                 if self.guion.linked() && !self.dock.contains(PaneKind::Guion) {
                     self.dock.replace(PaneKind::Media, PaneKind::Guion);
                 }
@@ -10821,6 +10824,7 @@ impl Studio {
         app.set_export(self.export.data(self));
         app.set_settings(self.settings.data(self));
         sync(&models.transcribers, self.settings.transcriber_rows());
+        sync(&models.pictures, self.settings.picture_rows());
         sync(&models.voices, self.settings.voice_rows());
         sync(&models.versions, self.settings.version_rows());
         sync(&models.version_details, self.settings.version_details());

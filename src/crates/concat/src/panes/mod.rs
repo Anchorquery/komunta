@@ -15,6 +15,7 @@
 //! export sheet is the first, and the shape the rest follow.
 
 pub mod asistente;
+pub mod asistente_carpeta;
 pub mod asistente_catalogo;
 pub mod asistente_externo;
 pub mod asistente_guion;
@@ -115,7 +116,7 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
         | Msg::Speech(SpeechMsg::Progress(_))
         | Msg::Montaje(MontajeMsg::Progress(_))
         | Msg::Guion(GuionMsg::Resized(_))
-        | Msg::Asistente(AsistenteMsg::Resized(_) | AsistenteMsg::Event(_))
+        | Msg::Asistente(AsistenteMsg::Shown | AsistenteMsg::Event(_))
         | Msg::Settings(SettingsMsg::ModelProgress { .. } | SettingsMsg::InstallProgress { .. }) => {
             return None;
         }
@@ -157,10 +158,10 @@ pub fn activity(msg: &Msg) -> Option<Activity> {
                 format!("asistente: sent, {} characters", texto.chars().count()),
             ));
         }
-        Msg::Asistente(AsistenteMsg::Finished(_, _, resultado)) => {
+        Msg::Asistente(AsistenteMsg::Finished(acabado)) => {
             return Some(Activity::once(
                 Info,
-                match resultado {
+                match &acabado.resultado {
                     Ok(fin) => format!("asistente: turn done, {fin:?}"),
                     Err(error) => format!("asistente: turn failed, {error}"),
                 },

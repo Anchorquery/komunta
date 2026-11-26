@@ -46,6 +46,7 @@ pub mod stabilize;
 pub mod templates;
 pub mod titles;
 pub mod updates;
+pub mod vision;
 pub mod voices;
 
 pub use brush::{Brushes, RegionRequest};

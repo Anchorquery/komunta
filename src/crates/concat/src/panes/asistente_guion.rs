@@ -148,7 +148,7 @@ pub fn herramientas() -> Vec<Herramienta> {
         ),
         Herramienta::nueva(
             APLICAR,
-            "Aplica el guion al vídeo, como el botón «Aplicar al vídeo», en cuanto acaba el turno: guarda \
+            "Aplica el guion al vídeo, como el botón «Crear versión con mis cambios», en cuanto acaba el turno: guarda \
              el plan, lo monta y añade líneas de tiempo nuevas al proyecto, que se guarda y se abre otra vez \
              con ellas delante. Las líneas de tiempo de antes quedan como estaban. Llámala al final, \
              cuando el guion esté como debe.",
